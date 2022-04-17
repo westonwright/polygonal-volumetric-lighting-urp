@@ -1,0 +1,51 @@
+#pragma kernel Downsample
+
+#include "UnityCG.cginc"
+
+static const int sqrtThreads = 32;
+
+RWBuffer<uint> _LaplacianMaps;
+
+const int _maxLaplacianWidth;
+const int _outputWidth;
+const int _downsampleLevel;
+
+uint Index(uint x, uint dimX, uint y, uint dimY, uint z)
+{
+    return x + dimX * y + dimX * dimY * z;
+}
+
+uint GetLaplacianStartIndex(int downsampleLevel)
+{
+    // we can use the 4/3s rule here since the laplacian texture goes all the way down to 2
+    //return floor(pow(laplacianTextureWidth / 2, 2) / 3.0f) * 4;
+    uint curLaplacianTextureWidth = _maxLaplacianWidth;
+    uint laplacianStartIndex = 0;
+    for (int j = 0; j < downsampleLevel; j++)
+    {
+        laplacianStartIndex += (uint) pow(curLaplacianTextureWidth, 2);
+        curLaplacianTextureWidth /= 2;
+    }
+    
+    return laplacianStartIndex;
+}
+
+[numthreads(sqrtThreads, sqrtThreads, 1)]
+void Downsample(int2 id : SV_DispatchThreadID)
+{
+    if (id.x >= _outputWidth || id.y >= _outputWidth)
+    {
+        return;
+    }
+    
+    uint laplacianStartIndex = GetLaplacianStartIndex(_downsampleLevel);
+    uint inputWidth = _outputWidth * 2;
+    uint o = (
+    _LaplacianMaps[Index(id.x * 2, inputWidth, id.y * 2, inputWidth, 0) + laplacianStartIndex] +
+    _LaplacianMaps[Index((id.x * 2) + 1, inputWidth, id.y * 2, inputWidth, 0) + laplacianStartIndex] +
+    _LaplacianMaps[Index(id.x * 2, inputWidth, (id.y * 2) + 1, inputWidth, 0) + laplacianStartIndex] +
+    _LaplacianMaps[Index((id.x * 2) + 1, inputWidth, (id.y * 2) + 1, inputWidth, 0) + laplacianStartIndex]
+    );
+    
+    _LaplacianMaps[Index(id.x, _outputWidth, id.y, _outputWidth, 0) + GetLaplacianStartIndex(_downsampleLevel + 1)] = o > 0 ? 1 : 0;
+}

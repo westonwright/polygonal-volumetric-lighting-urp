@@ -1,0 +1,615 @@
+#pragma kernel InitializeTesselationMap
+#pragma kernel InitializeFirstLayer
+#pragma kernel InitializeQuadBuffers
+#pragma kernel InitializeEdgeBuffers
+#pragma kernel InitializeCountsBuffer
+#pragma kernel InitializeArgBuffers
+#pragma kernel ComputeLevel
+#pragma kernel Compare
+#pragma kernel CopyToArgs
+#pragma kernel SwapReadWrite
+#pragma kernel PrepareNextLoop
+
+#include "UnityCG.cginc"
+
+static const uint numThreads = 1024;
+
+//Texture2D<float> _LaplacianTexture; // updated for each ping pong based on which level is optimal
+//RWTexture2D<float2> _OutputTex;
+Buffer<uint> _LaplacianTextures;
+
+// store 0 if you don't exist, 1 if you do exist, 2 if you exist and want to tesselate, 3 if you exist and should check again
+// if you are 3, you should also store your neighbors in the 4 most significant bits
+RWBuffer<uint> _TesselationMap; 
+
+RWBuffer<uint> _ReadQuadsBuffer;
+RWBuffer<uint> _WriteQuadsBuffer;
+
+RWBuffer<uint> _EmitQuads;
+RWBuffer<uint> _EmitEdges;
+
+RWBuffer<uint> _CountsBuffer; // 0 is read quad count, 1 is write quad count, 2 is emit quad count, 3 is emit edge count
+
+RWBuffer<uint> _WriteArgs;
+RWBuffer<uint> _QuadArgs;
+RWBuffer<uint> _EdgeArgs;
+
+// for initialization specifically
+const uint _totalTesselationSize;
+const uint _maxQuadSize;
+const uint _maxEdgeSize;
+const uint _baseTesselationMapSize;
+
+// set once at beginning
+const uint _maxTesselation;
+const uint _baseTesselationMapWidth;
+//const float _baseChunkScale;
+const float2 _cameraChunkPos;
+const float _fovYRads;
+const float _distFactor;
+const uint _maxLaplacianWidth;
+const uint _laplacianLevels;
+
+struct tesselationDepthData
+{
+    uint tesselationMapWidth;
+    uint mapIndex;
+    uint nextMapIndex;
+    uint laplacianWidth;
+    uint laplacianStartIndex;
+    float4x4 coordsToLight;
+};
+
+StructuredBuffer<tesselationDepthData> _TesselationDepthData;
+
+//could get rid of this and just read quad value directly and swap x and y
+static const float2 TranslationTable[4] =
+{
+    float2(0, 0),
+    float2(1, 0),
+    float2(0, 1),
+    float2(1, 1)
+};
+
+int Coords2Index(int x, int dimX, int y, int dimY, int z)
+{
+    return x + dimX * y + dimX * dimY * z;
+}
+
+uint Coords2Index(uint x, uint dimX, uint y, uint dimY, uint z)
+{
+    return x + dimX * y + dimX * dimY * z;
+}
+
+uint2 Index2Coords(uint index, uint dimX)
+{
+    return uint2((index % dimX), (index / dimX));
+}
+
+uint ReadTesselationMap(uint index)
+{
+    uint compactIndex = index / 16u;
+    uint offset = (index % 16u) * 2u;
+    return (_TesselationMap[compactIndex] >> offset) & 0x00000003;
+}
+
+void WriteTesselationMap(uint index, uint val)
+{
+    uint compactIndex = index / 16u;
+    uint offset = (index % 16u) * 2u;
+   
+    InterlockedAnd(_TesselationMap[compactIndex], (~(3u << offset)));
+    InterlockedOr(_TesselationMap[compactIndex], (val << offset));
+    //_TesselationMap[compactIndex] = (_TesselationMap[compactIndex] & (~(3u << offset))) | (val << offset);
+}
+
+void WriteTesselationMap(uint index, uint initialVal, uint newVal)
+{
+    uint compactIndex = index / 16u;
+    uint offset = (index % 16u) * 2u;
+    
+    // if initial val is 1, and new val is 2, add double true val
+    uint trueInitial = initialVal << offset;
+    uint trueNew = newVal << offset;
+    
+    int addVal = int(trueNew) - int(trueInitial);
+    
+    // if initial val is 0, add true val
+    
+    InterlockedAdd(_TesselationMap[compactIndex], addVal);
+}
+
+uint GetTesselationDepth(uint quad)
+{
+    uint depthKey = quad & 0x0003FFFF;
+    uint tesselationDepth = _maxTesselation;
+    uint shift = tesselationDepth * 2u;
+    while ((depthKey >> shift) == 0u)
+    {
+        tesselationDepth--;
+        shift -= 2u;
+        if (shift <= 0u)
+        {
+            break;
+        }
+    }
+    return tesselationDepth;
+}
+
+// in this, must account for base quads that don't have a tesselation level!!!!
+uint2 GetTexPixelCoords(uint rawQuad, uint tesselationDepth)
+{
+    uint2 coords = Index2Coords((rawQuad >> 20u), _baseTesselationMapWidth) * pow(2, tesselationDepth);
+    uint2 translation = uint2(0, 0);
+    uint quadSize = 1;
+    uint quadTesselation = rawQuad & 0x0003FFFF;
+    for (uint i = 0; i < tesselationDepth; i++)
+    {
+        translation = TranslationTable[quadTesselation & 0x00000003];
+        coords += translation * quadSize;
+        quadSize *= 2u;
+        quadTesselation >>= 2u; // fix for uint 2
+    }
+    return coords;
+}
+
+uint GetEdges(uint2 coords, uint tesselationMapWidth)
+{
+    return
+    ((coords.x < (tesselationMapWidth - 1u) ? 1u : 0u) << 3u) |
+    ((coords.y < (tesselationMapWidth - 1u) ? 1u : 0u) << 2u) |
+    ((coords.x > 0u ? 1u : 0u) << 1u) |
+    (coords.y > 0u ? 1u : 0u);
+}
+
+uint GetMaxTesselation(float distance)
+{
+    return min(-log2((distance * tan(_fovYRads / 2)) / (sqrt(2) * _distFactor)), _maxTesselation);
+}
+
+uint GetRegionalNeighbors(uint neighbors, uint posInParent)
+{        
+    uint regionalNeighbors = 0u;
+    switch (posInParent)
+    {
+        case 0u:
+            // 1 and 0
+            regionalNeighbors = ((neighbors & 0x00000002) >> 1u) | ((neighbors & 0x00000001) << 1u);
+            break;
+        case 1u:
+            // 0 and 3
+            regionalNeighbors = (neighbors & 0x00000001) | ((neighbors & 0x00000008) >> 2u);
+            break;
+        case 2u:
+            // 2 and 1
+            regionalNeighbors = ((neighbors & 0x00000004) >> 2u) | (neighbors & 0x00000002);
+            break;
+        case 3u:
+            // 3 and 2
+            regionalNeighbors = ((neighbors & 0x00000008) >> 3u) | ((neighbors & 0x00000004) >> 1u);
+            break;
+    }
+    
+    return regionalNeighbors;
+}
+
+
+[numthreads(numThreads, 1, 1)]
+// run for total tesselation size
+void InitializeTesselationMap(uint id : SV_DispatchThreadID)
+{    
+    if (id.x >= _totalTesselationSize)
+    {
+        return;
+    }
+    
+    uint original;
+    InterlockedExchange(_TesselationMap[id.x], 0u, original);
+}
+
+[numthreads(numThreads, 1, 1)]
+// run for total tesselation size
+void InitializeFirstLayer(uint id : SV_DispatchThreadID)
+{    
+    if (id.x >= _baseTesselationMapSize)
+    {
+        return;
+    }
+    
+    uint compactIndex = id.x / 16u;
+    uint offset = (id.x % 16u) * 2u;
+    
+    WriteTesselationMap(id.x, 0, 1);
+    //InterlockedAnd(_TesselationMap[compactIndex], (~(3u << offset)));
+    //InterlockedOr(_TesselationMap[compactIndex], (1u << offset));
+    
+    //WriteTesselationMap(id.x, 1u);
+}
+
+[numthreads(numThreads, 1, 1)]
+// run for max quad length
+void InitializeQuadBuffers(uint id : SV_DispatchThreadID)
+{
+    if (id.x >= _maxQuadSize)
+    {
+        return;
+    }
+    
+    uint original;
+    InterlockedExchange(_ReadQuadsBuffer[id.x], id.x < _baseTesselationMapSize ? ((id.x << 20u) | 1u) : 0u, original);
+    InterlockedExchange(_WriteQuadsBuffer[id.x], 0u, original);
+    InterlockedExchange(_EmitQuads[id.x], 0u, original);
+}
+
+[numthreads(numThreads, 1, 1)]
+// run for max edge length
+void InitializeEdgeBuffers(uint id : SV_DispatchThreadID)
+{
+    if (id.x >= _maxEdgeSize)
+    {
+        return;
+    }
+    
+    uint maxEdgeLength = _baseTesselationMapWidth * pow(2u, _maxTesselation) * 4u;
+    
+    for (uint l = 0u; l < maxEdgeLength; l++)
+    {
+        _EmitEdges[l] = 0u;
+    }
+}
+
+
+[numthreads(1, 1, 1)]
+void InitializeCountsBuffer(uint id : SV_DispatchThreadID)
+{
+    _CountsBuffer[0] = _baseTesselationMapSize;
+    _CountsBuffer[1] = 0u;
+    _CountsBuffer[2] = 0u;
+    _CountsBuffer[3] = 1u;
+}
+
+[numthreads(1, 1, 1)]
+void InitializeArgBuffers(uint id : SV_DispatchThreadID)
+{
+    _WriteArgs[0] = max(ceil(_baseTesselationMapSize / float(numThreads)), 1);
+    _WriteArgs[1] = 1;
+    _WriteArgs[2] = 1;
+
+    _QuadArgs[0] = 6u;
+    _QuadArgs[1] = 0u;
+    _EdgeArgs[0] = 6u;
+    _EdgeArgs[1] = 0u;
+}
+
+[numthreads(numThreads, 1, 1)]
+void ComputeLevel(uint id : SV_DispatchThreadID)
+{ 
+    //check for tesselation level of neighbor's parent as well to avoid two levels of tesselation difference
+
+    //if (id.x >= _WriteQuadCount[_tesselationDepth])
+    if (id.x >= _CountsBuffer[0])
+    {
+        return;
+    }
+    uint quad = _ReadQuadsBuffer[id.x];
+
+    uint tesselationDepth = GetTesselationDepth(quad);
+
+    tesselationDepthData depthData = _TesselationDepthData[tesselationDepth];
+    //uint tesselationMapWidth = GetTesselationMapWidth(tesselationDepth);
+    uint tesselationMapWidth = depthData.tesselationMapWidth;
+    
+    //uint mapIndex = GetMapIndex(tesselationMapWidth);
+    uint mapIndex = depthData.mapIndex;
+
+    //uint nextMapIndex = GetNextMapIndex(tesselationMapWidth);
+    uint nextMapIndex = depthData.nextMapIndex;
+    
+    //uint laplacianTextureWidth = GetLaplacianTextureWidth(tesselationMapWidth);
+    uint laplacianTextureWidth = depthData.laplacianWidth;
+    
+    // coords are correct (I think)
+    uint2 coords = GetTexPixelCoords(quad, tesselationDepth);
+
+    uint readIndex = Coords2Index(coords.x, tesselationMapWidth, coords.y, tesselationMapWidth, 0) + mapIndex;
+    
+    // edge is 0 if on an edge and 1 if not.
+    uint edge = GetEdges(coords, tesselationMapWidth);
+    
+    uint neighbors =
+    (((edge & 0x00000008) >> 3u ?
+    (ReadTesselationMap(readIndex + 1u) > 0u ? 1u : 0u): 1u) << 3u) |
+    (((edge & 0x00000004) >> 2u ?
+    (ReadTesselationMap(readIndex + tesselationMapWidth) > 0u ? 1u : 0u) : 1u) << 2u) |
+    (((edge & 0x00000002) >> 1u ?
+    (ReadTesselationMap(readIndex - 1u) > 0u ? 1u : 0u) : 1u) << 1u) |
+    (edge & 0x00000001 ?
+    (ReadTesselationMap(readIndex - tesselationMapWidth) > 0u ? 1u : 0u) : 1u);
+
+    //uint _curMaxTesselation = GetMaxTesselation(distance(_cameraChunkPos, mul(GetCoordsToLightMatrix(tesselationMapWidth), float4(coords.xy, 0, 1)).xy));
+    uint _curMaxTesselation = GetMaxTesselation(distance(_cameraChunkPos, mul(depthData.coordsToLight, float4(coords.xy, 0, 1)).xy));
+    
+    //if ((neighbors < 15u) || ((tesselationDepth + 1) >= _maxTesselation) || (tesselationDepth > _curMaxTesselation))
+    if ((neighbors < 15u) || ((tesselationDepth + 1) >= _maxTesselation) || (tesselationDepth > _curMaxTesselation))
+    {
+        //if can't tesselate, add to tribuffer
+
+        // add edge quads if emitted quad is on the edge
+        // edge quads store their edge in the 2 most significant bits
+        // bit mask would be 0x30000000
+        // shift would be >> 30u
+        
+        uint mask = 1u;
+        for (uint i = 0; i < 4u; i++)
+        {
+            if (((edge & mask) >> i) == 0u)
+            {
+                int edgeIndex;
+                //InterlockedAdd(_EmitEdgeCount[_tesselationDepth], 1, edgeIndex);
+                InterlockedAdd(_CountsBuffer[3], 1, edgeIndex);
+                
+                //_EmitEdges[edgeIndex] = uint2(quad.x | (i << 30u), quad.y);
+                _EmitEdges[edgeIndex] = quad | (i << 18u);
+            }
+            mask <<= 1;
+        }
+        
+        int quadIndex;
+        //InterlockedAdd(_EmitQuadCount[_tesselationDepth], 1, quadIndex);
+        InterlockedAdd(_CountsBuffer[2], 1, quadIndex);
+
+        //_EmitQuads[quadIndex] = uint2(quad.x | (GetRegionalNeighbors(neighbors, quad.x & 0x00000003) << 30u), quad.y);
+        _EmitQuads[quadIndex] = quad | (GetRegionalNeighbors(neighbors, quad & 0x00000003) << 18u);
+        //_OutputTex[coords] = float2(1, 0);
+        return;
+    }
+
+    
+    // get ratio of edge map world size to tesselation map world size
+    //get circle 4x4 circle of pixels around point
+    float laplacianTextureValue = 0;
+    //int laplacianStartIndex = GetLaplacianStartIndex(laplacianTextureWidth);
+    int laplacianStartIndex = depthData.laplacianStartIndex;
+    //for (uint x = 0; x < 2; x++)
+    for (int x = -1; x < 3; x++)
+    {
+        //for (uint y = 0; y < 2; y++)
+        for (int y = -1; y < 3; y++)
+        {
+            //float2 laplacianPos = float2(coords.x + x, coords.y + y) / tesselationMapWidth;
+            float2 laplacianPos = float2(clamp(int(coords.x) + x, 0, int(tesselationMapWidth)), clamp(int(coords.y) + y, 0, int(tesselationMapWidth))) / tesselationMapWidth;
+            int2 laplacianCoords = int2(round(laplacianPos * (laplacianTextureWidth - 1)));
+            laplacianTextureValue += _LaplacianTextures[Coords2Index(laplacianCoords.x, laplacianTextureWidth, laplacianCoords.y, laplacianTextureWidth, 0) + laplacianStartIndex];
+            //laplacianTextureValue += _LaplacianTexture[int2(round(laplacianPos * (laplacianTextureWidth - 1)))];
+        }
+    }
+    
+    if (laplacianTextureValue >= .01f)
+    {
+        uint doubleSize = tesselationMapWidth * 2;
+
+        uint childrenIndex = Coords2Index(coords.x * 2, doubleSize, coords.y * 2, doubleSize, 0) + nextMapIndex;
+                
+        //_TesselationMap[readIndex] = 2u;
+        WriteTesselationMap(readIndex, 1u, 2u);
+
+        uint _writeOut;
+        //InterlockedAdd(_WriteQuadCount[_tesselationDepth + 1], 4, _writeOut);
+        InterlockedAdd(_CountsBuffer[1], 4, _writeOut);
+        //_TesselationMap[childrenIndex] = 1u;
+        WriteTesselationMap(childrenIndex, 1u);
+        //_WriteQuadsBuffer[_writeOut] = uint2((quad.x << 2u) | 0u, quad.y);
+        _WriteQuadsBuffer[_writeOut] = (((quad & 0x0003FFFF) << 2u) | 0u) | (quad & 0xFFF00000);
+        //_TesselationMap[childrenIndex + 1] = 1u;
+        WriteTesselationMap(childrenIndex + 1, 1u);
+        //_WriteQuadsBuffer[_writeOut + 1] = uint2((quad.x << 2u) | 1u, quad.y);
+        _WriteQuadsBuffer[_writeOut + 1] = (((quad & 0x0003FFFF) << 2u) | 1u) | (quad & 0xFFF00000);
+        //_TesselationMap[childrenIndex + doubleSize] = 1u;
+        WriteTesselationMap(childrenIndex + doubleSize, 1u);
+        //_WriteQuadsBuffer[_writeOut + 2] = uint2((quad.x << 2u) | 2u, quad.y);
+        _WriteQuadsBuffer[_writeOut + 2] = (((quad & 0x0003FFFF) << 2u) | 2u) | (quad & 0xFFF00000);
+        //_TesselationMap[childrenIndex + doubleSize + 1] = 1u;
+        WriteTesselationMap(childrenIndex + doubleSize + 1, 1u);
+        //_WriteQuadsBuffer[_writeOut + 3] = uint2((quad.x << 2u) | 3u, quad.y);
+        _WriteQuadsBuffer[_writeOut + 3] = (((quad & 0x0003FFFF) << 2u) | 3u) | (quad & 0xFFF00000);
+
+        //_OutputTex[coords] = float2(0, 1);
+        return;
+    }
+
+    //_TesselationMap[readIndex] = (neighbors << 28u) | 3u;
+    WriteTesselationMap(readIndex, 1u, 3u);
+    
+    return;
+}
+
+// need to check if neighbors are going to tesselate because if you don't and your neighbor does, it will prevent your neighbor's
+// children from tesselating far enough to reach their edge
+// you only need to check you neighbor because 1 + 1/2 series converges on 2, aka, the size of your neighbor.
+//not sure if i should just check up down left right neighbors or also corner neighbors?
+[numthreads(numThreads, 1, 1)]
+void Compare(uint id : SV_DispatchThreadID)
+{
+    //if (id.x >= _WriteQuadCount[_tesselationDepth])
+    if (id.x >= _CountsBuffer[0])
+    {
+        return;
+    }
+    
+    uint quad = _ReadQuadsBuffer[id.x];
+
+    uint tesselationDepth = GetTesselationDepth(quad);
+    
+    tesselationDepthData depthData = _TesselationDepthData[tesselationDepth];
+
+    //uint tesselationMapWidth = GetTesselationMapWidth(tesselationDepth);
+    uint tesselationMapWidth = depthData.tesselationMapWidth;
+    
+    //uint mapIndex = GetMapIndex(tesselationMapWidth);
+    uint mapIndex = depthData.mapIndex;
+
+    //uint nextMapIndex = GetNextMapIndex(tesselationMapWidth);
+    uint nextMapIndex = depthData.nextMapIndex;
+    
+    uint2 coords = GetTexPixelCoords(quad, tesselationDepth);
+
+    uint readIndex = Coords2Index(coords.x, tesselationMapWidth, coords.y, tesselationMapWidth, 0) + mapIndex;
+
+    if (ReadTesselationMap(readIndex) != 3u)
+    {
+        return;
+    }
+    
+    uint edge = GetEdges(coords, tesselationMapWidth);
+    
+    // gets cardinal directions and diagonal directions
+    uint wideNeighbors =
+    (((edge & 0x00000008) >> 3u ?
+    (ReadTesselationMap(readIndex + 1) == 2u ? 1u : 0u) : 0u) << 7u) |
+    (((((edge & 0x00000008) >> 3u) && ((edge & 0x00000004) >> 2u)) ?
+    (ReadTesselationMap(readIndex + 1 + tesselationMapWidth) == 2u ? 1u : 0u) : 0u) << 6u) |
+    (((edge & 0x00000004) >> 2u ?
+    (ReadTesselationMap(readIndex + tesselationMapWidth) == 2u ? 1u : 0u) : 0u) << 5u) |
+    (((((edge & 0x00000002) >> 1u) && ((edge & 0x00000004) >> 2u)) ?
+    (ReadTesselationMap(readIndex - 1 + tesselationMapWidth) == 2u ? 1u : 0u) : 0u) << 4u) |
+    (((edge & 0x00000002) >> 1u ?
+    (ReadTesselationMap(readIndex - 1) == 2u ? 1u : 0u) : 0u) << 3u) |
+    (((((edge & 0x00000002) >> 1u) && (edge & 0x00000001)) ?
+    (ReadTesselationMap(readIndex - 1 - tesselationMapWidth) == 2u ? 1u : 0u) : 0u) << 2u) |
+    ((edge & 0x00000001 ?
+    (ReadTesselationMap(readIndex - tesselationMapWidth) == 2u ? 1u : 0u) : 0u) << 1u) |
+    ((((edge & 0x00000008) >> 3u) && (edge & 0x00000001)) ?
+    (ReadTesselationMap(readIndex + 1 - tesselationMapWidth) == 2u ? 1u : 0u) : 0u);
+    
+    //keep and mind edge detection behavior is different for neighbors and wide neighbors
+    uint neighbors =
+    (((edge & 0x00000008) >> 3u ?
+    (ReadTesselationMap(readIndex + 1) > 0u ? 1u : 0u) : 1u) << 3u) |
+    (((edge & 0x00000004) >> 2u ?
+    (ReadTesselationMap(readIndex + tesselationMapWidth) > 0u ? 1u : 0u) : 1u) << 2u) |
+    (((edge & 0x00000002) >> 1u ?
+    (ReadTesselationMap(readIndex - 1) > 0u ? 1u : 0u) : 1u) << 1u) |
+    (edge & 0x00000001 ?
+    (ReadTesselationMap(readIndex - tesselationMapWidth) > 0u ? 1u : 0u) : 1u);
+    /*
+    uint neighbors =
+    (((edge & 0x00000008) >> 3u ?
+    ((_TesselationMap[readIndex + 1] & 0x00000003) == 2u ? 1u : 0u) : 0u) << 7u) |
+    (((((edge & 0x00000008) >> 3u) && ((edge & 0x00000004) >> 2u)) ?
+    ((_TesselationMap[readIndex + 1 + tesselationMapWidth] & 0x00000003) == 2u ? 1u : 0u) : 0u) << 6u) |
+    (((edge & 0x00000004) >> 2u ?
+    ((_TesselationMap[readIndex + tesselationMapWidth] & 0x00000003) == 2u ? 1u : 0u) : 0u) << 5u) |
+    (((((edge & 0x00000002) >> 1u) && ((edge & 0x00000004) >> 2u)) ?
+    ((_TesselationMap[readIndex - 1 + tesselationMapWidth] & 0x00000003) == 2u ? 1u : 0u) : 0u) << 4u) |
+    (((edge & 0x00000002) >> 1u ?
+    ((_TesselationMap[readIndex - 1] & 0x00000003) == 2u ? 1u : 0u) : 0u) << 3u) |
+    (((((edge & 0x00000002) >> 1u) && (edge & 0x00000001)) ?
+    ((_TesselationMap[readIndex - 1 - tesselationMapWidth] & 0x00000003) == 2u ? 1u : 0u) : 0u) << 2u) |
+    ((edge & 0x00000001 ?
+    ((_TesselationMap[readIndex - tesselationMapWidth] & 0x00000003) == 2u ? 1u : 0u) : 0u) << 1u) |
+    ((((edge & 0x00000008) >> 3u) && (edge & 0x00000001)) ?
+    ((_TesselationMap[readIndex + 1 - tesselationMapWidth] & 0x00000003) == 2u ? 1u : 0u) : 0u);
+    */
+
+    // if this quad doesn't have any neighbors who exist or who are rechecking, emit a quad
+    if ((wideNeighbors == 0u) || ((tesselationDepth + 2) >= _maxTesselation))
+    //if (((tesselationDepth + 2) >= _maxTesselation))
+    {         
+        uint mask = 1u;
+        for (uint i = 0; i < 4u; i++)
+        {
+            if (((edge & mask) >> i) == 0u)
+            {
+                int edgeIndex;
+                //InterlockedAdd(_EmitEdgeCount[_tesselationDepth], 1, edgeIndex);
+                InterlockedAdd(_CountsBuffer[3], 1, edgeIndex);
+                
+                //_EmitEdges[edgeIndex] = uint2(quad.x | (i << 30u), quad.y);
+                _EmitEdges[edgeIndex] = quad | (i << 18u);
+            }
+            mask <<= 1;
+        }
+        
+        int quadIndex;
+        //InterlockedAdd(_EmitQuadCount[_tesselationDepth], 1, quadIndex);
+        InterlockedAdd(_CountsBuffer[2], 1, quadIndex);
+        
+        //_EmitQuads[quadIndex] = uint2(quad.x | (_TesselationMap[readIndex] & 0xF0000000), quad.y);
+        // don't need to get regional neighbors because we know they have all of them
+        _EmitQuads[quadIndex] = quad | 0x000C0000;
+        //_OutputTex[coords] = float2(0.05f, 0);
+        return;
+    }
+    // for every quad with four exisiting neighbors, check if neighbors are going to tesslate
+    // if any of the neighbors are going to tesselate, you should also tesselate
+
+    // tesselate
+    uint doubleSize = tesselationMapWidth * 2;
+
+    uint childrenIndex = Coords2Index(coords.x * 2, doubleSize, coords.y * 2, doubleSize, 0) + nextMapIndex;
+
+    uint _writeOut;
+    //InterlockedAdd(_WriteQuadCount[_tesselationDepth + 1], 4, _writeOut);
+    InterlockedAdd(_CountsBuffer[1], 4, _writeOut);
+    //_TesselationMap[childrenIndex] = 1u;
+    WriteTesselationMap(childrenIndex, 1u);
+    //_WriteQuadsBuffer[_writeOut] = uint2((quad.x << 2u) | 0u, quad.y);
+    _WriteQuadsBuffer[_writeOut] = (((quad & 0x0003FFFF) << 2u) | 0u) | (quad & 0xFFF00000);
+    //_TesselationMap[childrenIndex + 1] = 1u;
+    WriteTesselationMap(childrenIndex + 1, 1u);
+    //_WriteQuadsBuffer[_writeOut + 1] = uint2((quad.x << 2u) | 1u, quad.y);
+    _WriteQuadsBuffer[_writeOut + 1] = (((quad & 0x0003FFFF) << 2u) | 1u) | (quad & 0xFFF00000);
+    //_TesselationMap[childrenIndex + doubleSize] = 1u;
+    WriteTesselationMap(childrenIndex + doubleSize, 1u);
+    //_WriteQuadsBuffer[_writeOut + 2] = uint2((quad.x << 2u) | 2u, quad.y);
+    _WriteQuadsBuffer[_writeOut + 2] = (((quad & 0x0003FFFF) << 2u) | 2u) | (quad & 0xFFF00000);
+    //_TesselationMap[childrenIndex + doubleSize + 1] = 1u;
+    WriteTesselationMap(childrenIndex + doubleSize + 1, 1u);
+    //_WriteQuadsBuffer[_writeOut + 3] = uint2((quad.x << 2u) | 3u, quad.y);
+    _WriteQuadsBuffer[_writeOut + 3] = (((quad & 0x0003FFFF) << 2u) | 3u) | (quad & 0xFFF00000);
+                
+    //_OutputTex[coords] = float2(1, 1);
+    return;
+}
+
+[numthreads(1, 1, 1)]
+void CopyToArgs(uint id : SV_DispatchThreadID)
+{
+    if (id.x >= 1)
+    {
+        return;
+    }
+    
+    //_WriteArgs[0] = max(ceil(_CountsBuffer[1] / float(numThreads)), 1);
+    _WriteArgs[0] = max(ceil(_CountsBuffer[1] / float(numThreads)), 1);
+
+    //_WriteArgs[0] = 100;
+    
+    _QuadArgs[1] = _CountsBuffer[2];
+    _EdgeArgs[1] = _CountsBuffer[3];
+}
+
+[numthreads(numThreads, 1, 1)]
+void SwapReadWrite(uint id : SV_DispatchThreadID)
+{
+    //if (id.x >= _WriteQuadCount[_tesselationDepth + 1])
+    if (id.x >= _CountsBuffer[1])
+    {
+        return;
+    }
+    
+    _ReadQuadsBuffer[id.x] = _WriteQuadsBuffer[id.x];
+}
+
+[numthreads(1, 1, 1)]
+void PrepareNextLoop(uint id : SV_DispatchThreadID)
+{
+    if (id.x >= 1)
+    {
+        return;
+    }
+    _CountsBuffer[0] = _CountsBuffer[1];
+    _CountsBuffer[1] = 0;
+    _CountsBuffer[2] = 0;
+    _CountsBuffer[3] = 0;
+}

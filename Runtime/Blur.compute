@@ -1,0 +1,69 @@
+//#pragma kernel InitializeLaplacian
+// With help from https://valeriomarty.medium.com/raymarched-volumetric-lighting-in-unity-urp-e7bc84d31604
+#pragma kernel BlurKernel
+#pragma kernel ComputeBlur
+#include "UnityCG.cginc"
+
+#define PI 3.1415926538
+#define E 2.71828182
+
+//find better way to determine number of threads
+static const uint numThreads = 1024;
+static const int sqrtThreads = 32;
+
+RWBuffer<float> _Kernel;
+const int _kernelRadius;
+const float _stDev;
+
+Texture2D<float> _CameraDepthTexture;
+Texture2D<float4> _BaseTexture;
+RWTexture2D<float4> _BlurTexture;
+
+const int2 _textureSize;
+const int2 _direction;
+const int _downsampleRatio;
+const float _blurDepthFalloff;
+
+[numthreads(numThreads, 1, 1)]
+void BlurKernel(int id : SV_DispatchThreadID)
+{
+    if (id.x >= _kernelRadius)
+    {
+        return;
+    }
+    
+    for (int y = 0; y < _kernelRadius; y++)
+    {
+        float xcomp = (id.x * id.x) / (2 * (_stDev * _stDev));
+        _Kernel[id.x] = (1 / sqrt(2 * PI * (_stDev * _stDev))) * pow(E, -xcomp);
+    }
+}
+
+[numthreads(sqrtThreads, sqrtThreads, 1)]
+void ComputeBlur(int2 id : SV_DispatchThreadID)
+{
+    if (id.x >= _textureSize.x || id.y >= _textureSize.y)
+    {
+        return;
+    }
+    
+    float4 accumResult = 0.0f;
+    float4 accumWeight = 0.0f;
+    
+    float depthCenter = LinearEyeDepth(_CameraDepthTexture[id.xy * _downsampleRatio]);
+    
+    for (int x = -_kernelRadius + 1; x < _kernelRadius; x++)
+    {
+        uint2 dir = uint2(_direction.x * x, _direction.y * x);
+        uint2 samplePix = clamp(dir + id.xy, uint2(0, 0), _textureSize.xy - uint2(1, 1));
+        float depthSample = LinearEyeDepth(_CameraDepthTexture[samplePix * _downsampleRatio]);
+        float depthDiff = abs(depthSample - depthCenter);
+        float r2 = depthDiff * _blurDepthFalloff;
+        float g = exp(-r2 * r2);
+        float weight = g * _Kernel[abs(x)];
+        float4 sample = _BaseTexture[samplePix];
+        accumResult += weight * sample;
+        accumWeight += weight;
+    }
+    _BlurTexture[id.xy] = accumResult/accumWeight;
+}

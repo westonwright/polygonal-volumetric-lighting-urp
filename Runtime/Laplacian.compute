@@ -1,0 +1,87 @@
+//#pragma kernel InitializeLaplacian
+#pragma kernel LaplacianKernel
+#pragma kernel ComputeLaplacian
+
+#include "UnityCG.cginc"
+
+#define PI 3.1415926538
+#define E 2.71828182
+
+//find better way to determine number of threads
+static const int numThreads = 1024;
+static const int sqrtThreads = 32;
+
+Texture2D<float2> _BaseTexture;
+RWBuffer<uint> _LaplacianMaps;
+
+RWBuffer<float> _KernelBuffer;
+
+const int _textureSize;
+
+const int _kernelRadius;
+const float _stDev;
+
+const float _minCascadeDepth;
+const float _maxCascadeDepth;
+
+uint Index(uint x, uint dimX, uint y, uint dimY, uint z) {
+    return x + dimX * y + dimX * dimY * z;
+}
+
+float Remap(float fromIn, float fromMin, float fromMax, float toMin, float toMax)
+{
+
+    return (((fromIn - fromMin) / (fromMax - fromMin)) * (toMax - toMin)) + toMin;
+}
+
+[numthreads(numThreads, 1, 1)]
+void LaplacianKernel(int id : SV_DispatchThreadID)
+{
+    if (id.x >= _kernelRadius)
+    {
+        return;
+    }
+    
+    for (int y = 0; y < _kernelRadius; y++)
+    {
+        float xy = (id.x * id.x + y * y) / (2 * (_stDev * _stDev));
+        _KernelBuffer[Index(id.x, _kernelRadius, y, _kernelRadius, 0)] = -(1 / (PI * pow(_stDev, 4))) * (1 - xy) * pow(E, -xy);
+    }
+}
+
+[numthreads(sqrtThreads, sqrtThreads, 1)]
+void ComputeLaplacian(int2 id : SV_DispatchThreadID)
+{
+    if (id.x >= _textureSize || id.y >= _textureSize)
+    {
+        return;
+    }
+    
+    float conv = 0.0f;
+    
+    // if base sample green is 1, conv = 0
+    float2 baseSample = _BaseTexture[id.xy].xy;
+    baseSample.x = Remap(baseSample.x, _minCascadeDepth, _maxCascadeDepth, 0.0f, 1.0f);
+    if (baseSample.y < 0.1f)
+    {
+        for (int x = -_kernelRadius + 1; x < _kernelRadius; x++)
+        {
+            for (int y = -_kernelRadius + 1; y < _kernelRadius; y++)
+            {
+                float2 sample = _BaseTexture[int2(clamp(id.x + x, 0, _textureSize - 1), clamp(id.y + y, 0, _textureSize - 1))].xy;
+                sample.x = Remap(sample.x, _minCascadeDepth, _maxCascadeDepth, 0.0f, 1.0f);
+                float kernelSample = _KernelBuffer[Index(abs(x), _kernelRadius, abs(y), _kernelRadius, 0)];
+                if (sample.y < 0.1f)
+                {
+                    conv += sample.x * kernelSample;
+                }
+                else
+                {
+                    conv += baseSample.x * kernelSample;
+                }
+            }
+        }
+    }
+
+    _LaplacianMaps[Index(id.x, _textureSize, id.y, _textureSize, 0)] = abs(conv) > 0.001f ? 1 : 0;
+}
