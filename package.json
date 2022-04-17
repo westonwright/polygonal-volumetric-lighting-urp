@@ -1,7 +1,7 @@
 {
   "name": "com.weston-wright.polygonal-volumetric-lighting-urp",
   "description": "This package creates a mesh for volumetric lighting using a render feature",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "unity": "2021.2",
   "unityRelease": "0b6",
   "displayName": "URP Mesh Light Volumes",

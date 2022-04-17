@@ -44,7 +44,7 @@ const uint _baseTesselationMapSize;
 const uint _maxTesselation;
 const uint _baseTesselationMapWidth;
 //const float _baseChunkScale;
-const float2 _cameraChunkPos;
+const float2 _cameraLightPos;
 const float _fovYRads;
 const float _distFactor;
 const uint _maxLaplacianWidth;
@@ -326,8 +326,8 @@ void ComputeLevel(uint id : SV_DispatchThreadID)
     (edge & 0x00000001 ?
     (ReadTesselationMap(readIndex - tesselationMapWidth) > 0u ? 1u : 0u) : 1u);
 
-    //uint _curMaxTesselation = GetMaxTesselation(distance(_cameraChunkPos, mul(GetCoordsToLightMatrix(tesselationMapWidth), float4(coords.xy, 0, 1)).xy));
-    uint _curMaxTesselation = GetMaxTesselation(distance(_cameraChunkPos, mul(depthData.coordsToLight, float4(coords.xy, 0, 1)).xy));
+    //uint _curMaxTesselation = GetMaxTesselation(distance(_cameraLightPos, mul(GetCoordsToLightMatrix(tesselationMapWidth), float4(coords.xy, 0, 1)).xy));
+    uint _curMaxTesselation = GetMaxTesselation(distance(_cameraLightPos, mul(depthData.coordsToLight, float4(coords.xy, 0, 1)).xy));
     
     //if ((neighbors < 15u) || ((tesselationDepth + 1) >= _maxTesselation) || (tesselationDepth > _curMaxTesselation))
     if ((neighbors < 15u) || ((tesselationDepth + 1) >= _maxTesselation) || (tesselationDepth > _curMaxTesselation))

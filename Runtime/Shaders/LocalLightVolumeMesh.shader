@@ -8,28 +8,29 @@ Shader "Unlit/LocalLightVolumeMesh"
     CGINCLUDE
     #include "UnityCG.cginc"
 
-    const float4x4 _worldToShadow[5];
-    const float4x4 _shadowToWorld[5];
+    //const float4x4 _worldToShadow[5];
+    //const float4x4 _shadowToWorld[5];
     const float4x4 _cameraMatrix;
     const float4x4 _lightToWorld;
-    const float4 _cascadeShadowSplitSphereRadiiNear;
-    const float4 _cascadeShadowSplitSphereRadiiFar;
+    //const float4 _cascadeShadowSplitSphereRadiiNear;
+    //const float4 _cascadeShadowSplitSphereRadiiFar;
     const uint _maxTesselation;
     const uint _baseTesselationWidth;
-    const float _baseChunkScale;
-    const float3 _cameraChunkPos;
-    const float3 _cameraWorldPos;
-    const float4 _texelSize;
-    const float3 _lightDirection;
-    const float _depthBias;
-    const int _cascadeCount;
+    const float2 _baseChunkScale;
+    const float3 _centerPos;
+    //const float3 _cameraWorldPos;
+    //const float4 _texelSize;
+    //const float3 _lightDirection;
+    //const float _depthBias;
+    //const int _cascadeCount;
 
     struct v2f
     {
         //w determines if should be rendered or not
         float4 vertex : SV_POSITION;
         float4 world : TEXCOORD0;
-        float3 triID : TEXCOORD1; // triID in x, render in y
+        float4 view : TEXCOORD1;
+        float3 triID : TEXCOORD2; // triID in x, render in y
         UNITY_VERTEX_INPUT_INSTANCE_ID
     };
 
@@ -41,6 +42,8 @@ Shader "Unlit/LocalLightVolumeMesh"
     //sampler2D _MainLightShadowmapTextureCopy;
     sampler2D _LocalShadowTexture;
     sampler2D _CameraDepthTexture;
+
+    sampler2D _DownsampleTexture1;
     
     // could replace with just reading values directly from quad but might need to swap x and y
     static const float2 TranslationTable[4] = { 
@@ -65,6 +68,14 @@ Shader "Unlit/LocalLightVolumeMesh"
             }
         }
         return tesselationDepth;
+    }
+
+    float2 MultiplyVectors(float2 vector1, float2 vector2) {
+        return float2(vector1.x * vector2.x, vector1.y * vector2.y);
+    }
+
+    float2 DivideVectors(float2 vector1, float2 vector2) {
+        return float2(vector1.x / vector2.x, vector1.y / vector2.y);
     }
     /*
     uint GetTesselationDepth(uint2 quad) {
@@ -157,6 +168,7 @@ Shader "Unlit/LocalLightVolumeMesh"
                 if (render == 0) {
                     o.world = float4(0, 0, 0, 0);
                     o.vertex = float4(0, 0, 0, 0);
+                    o.view = float4(0, 0, 0, 0);
                     o.triID = float4(0, 0, 0, 0);
                     return o;
                 }
@@ -172,14 +184,14 @@ Shader "Unlit/LocalLightVolumeMesh"
                 //float2 parentOffset = float2(quad.y % _baseTesselationWidth, quad.y / _baseTesselationWidth);
                 uint topQuad = ((quad & 0xFFF00000) >> 20u);
                 float2 parentOffset = float2(topQuad % _baseTesselationWidth, topQuad / _baseTesselationWidth);
-                //parentOffset *= _baseChunkScale;
                 parentOffset -= floor((float(_baseTesselationWidth) / 2u));// +float2(.5, .5);
-                parentOffset *= _baseChunkScale;
-                parentOffset += _cameraChunkPos;
+                //parentOffset *= _baseChunkScale;
+                parentOffset = MultiplyVectors(parentOffset, _baseChunkScale);
+                parentOffset += _centerPos;
 
-                float quadScale = _baseChunkScale / pow(2, tesselationDepth);
+                float2 quadScale = _baseChunkScale / pow(2, tesselationDepth);
 
-                float curScale = quadScale;
+                float2 curScale = quadScale;
                 //uint translationVal = quad.x;
                 uint translationVal = quad & 0x0003FFFF;
                 float2 offset = parentOffset; //0 - 1
@@ -187,7 +199,7 @@ Shader "Unlit/LocalLightVolumeMesh"
                 for (uint i = 0; i < tesselationDepth; i++)
                 {
                     translation = TranslationTable[translationVal & 0x00000003];
-                    offset += translation * curScale;
+                    offset += curScale * translation;
                     curScale *= 2;
                     translationVal >>= 2u;
                 }
@@ -196,7 +208,7 @@ Shader "Unlit/LocalLightVolumeMesh"
                 float3 triPos = QuadTriTable[(posInParent * 24) + (neighbors * 6) + vertexID];
 
                 float3 lCoord = float3(((triPos.xy * quadScale) + offset.xy), 0);
-                float2 uv = (lCoord.xy - (_cameraChunkPos.xy - (_baseChunkScale * (_baseTesselationWidth / 2)))) / (_baseChunkScale * _baseTesselationWidth);
+                float2 uv = DivideVectors((lCoord.xy - (_centerPos.xy - (_baseChunkScale * (_baseTesselationWidth / 2)))), (_baseChunkScale * _baseTesselationWidth));
                 lCoord.z = tex2Dlod(_LocalShadowTexture, float4(uv, 0, 0)).r;
                 float3 wCoord = mul(_lightToWorld, float4(lCoord, 1));
 
@@ -204,6 +216,8 @@ Shader "Unlit/LocalLightVolumeMesh"
                 //o.world = float4(mul(_shadowToWorld[0], float4(texUV.xy, tex2Dlod(_MainLightShadowmapTextureCopy, float4(texUV.xy, 0, 0)).r, 1)).xyz, 1);
                 o.world = float4(wCoord, 1);
                 o.vertex = UnityObjectToClipPos(float4(o.world.xyz, 1));
+                float3 positionVS = mul(UNITY_MATRIX_V, o.world).xyz;
+                o.view = float4(positionVS, 1);
                 //o.vertex = mul(_cameraVP, (float4(o.world.xyz, 1)));
                 //convert the vertex position from world space to clip space
                 o.triID = float4(triID, render, vertexID, 0);
@@ -225,9 +239,15 @@ Shader "Unlit/LocalLightVolumeMesh"
                 float4 projected = mul(_cameraMatrix, float4(i.world.xyz, 1));
                 float2 uv = 1 - ((projected.xy / projected.w) * 0.5f + 0.5f);
 
-                float dist = distance(_WorldSpaceCameraPos, i.world.xyz);
+                //float dist = distance(_WorldSpaceCameraPos, i.world.xyz);
+                float dist = -i.view.z;
                 float depth = LinearEyeDepth(tex2D(_CameraDepthTexture, uv));
-                dist = clamp(dist, 0, depth);// dist > depth ? depth : dist;
+                float2 boxDepth = tex2D(_DownsampleTexture1, uv);
+                depth = min(depth, boxDepth.y);
+                dist = clamp(dist, boxDepth.x, depth);// dist > depth ? depth : dist;
+                //dist = clamp(dist, 0, depth);
+
+                dist = boxDepth.y == 0 ? 0 : dist;
 
                 //return facing > 0 ? float4(float(i.triID.z) / 6.0f, 0, 0, 1) : float4(0, float(i.triID.z) / 6.0f, 0, 1);
                 return facing > 0 ? float4(dist, 0, 0, 1) : float4(-dist, 0, 0, 1);
@@ -306,14 +326,15 @@ Shader "Unlit/LocalLightVolumeMesh"
 
                 //parentOffset *= _baseChunkScale;
                 parentOffset -= floor((float(_baseTesselationWidth) / 2u));// +float2(.5, .5);
-                parentOffset *= _baseChunkScale;
-                parentOffset += _cameraChunkPos;
+                //parentOffset *= _baseChunkScale;
+                parentOffset = MultiplyVectors(parentOffset, _baseChunkScale);
+                parentOffset += _centerPos;
 
                 // this is the ceiling piece
                 //if (edge.x == 0u)
                 if ((edge & 0x0003FFFF) == 0u)
                 {
-                    float3 texPos = float3((EdgeTriTable[vertexID].xy * (_baseTesselationWidth * _baseChunkScale)) + parentOffset, _cameraChunkPos.z - _edgeHeight);
+                    float3 texPos = float3((EdgeTriTable[vertexID].xy * (_baseChunkScale * _baseTesselationWidth)) + parentOffset, _centerPos.z - _edgeHeight);
 
                     /*
                     // first to light space
@@ -330,6 +351,8 @@ Shader "Unlit/LocalLightVolumeMesh"
                     //o.world = float4(heightCoord, 1);
                     o.world = mul(_lightToWorld, float4(texPos, 1));
                     o.vertex = UnityObjectToClipPos(float4(o.world.xyz, 1));
+                    float3 positionVS = mul(UNITY_MATRIX_V, o.world).xyz;
+                    o.view = float4(positionVS, 1);
                     o.triID = float4(triID, 0, vertexID, 0);
                     return o;
                 }
@@ -339,20 +362,20 @@ Shader "Unlit/LocalLightVolumeMesh"
 
                 uint tesselationDepth = GetTesselationDepth(edge);
 
-                float edgeScale = _baseChunkScale / pow(2, tesselationDepth);
+                float2 edgeScale = _baseChunkScale / pow(2, tesselationDepth);
 
-                float curScale = edgeScale;
+                float2 curScale = edgeScale;
                 //uint translationVal = edge.x;
                 uint translationVal = edge & 0x0003FFFF;
                 // initializing offset like this allows edges to all actually be on the outside edge of the shape
                 //float2 offset = float2(connectedEdge == 3u ? curScale : 0, connectedEdge == 2u ? curScale : 0); //0 - 1
-                float2 offset = parentOffset + float2(connectedEdge == 3u ? curScale : 0, connectedEdge == 2u ? curScale : 0); //0 - 1
+                float2 offset = parentOffset + float2(connectedEdge == 3u ? curScale.x : 0, connectedEdge == 2u ? curScale.y : 0); //0 - 1
                 float2 translation = float2(0, 0);
 
                 for (uint i = 0u; i < tesselationDepth; i++)
                 {
                     translation = TranslationTable[translationVal & 0x00000003];
-                    offset += translation * curScale;
+                    offset += curScale * translation;
                     curScale *= 2;
                     translationVal >>= 2u;
                 }
@@ -363,13 +386,15 @@ Shader "Unlit/LocalLightVolumeMesh"
                 //triPos.z *= _edgeHeight;
 
                 float3 lCoord = float3(((triPos.xy * edgeScale) + offset.xy), 0);
-                float2 uv = (lCoord.xy - (_cameraChunkPos.xy - (_baseChunkScale * (_baseTesselationWidth / 2)))) / (_baseChunkScale * _baseTesselationWidth);
-                lCoord.z = triPos.z > 0 ? _cameraChunkPos.z - _edgeHeight : tex2Dlod(_LocalShadowTexture, float4(uv, 0, 0)).r;
+                float2 uv = DivideVectors((lCoord.xy - (_centerPos.xy - (_baseChunkScale * (_baseTesselationWidth / 2)))), (_baseChunkScale * _baseTesselationWidth));
+                lCoord.z = triPos.z > 0 ? _centerPos.z - _edgeHeight : tex2Dlod(_LocalShadowTexture, float4(uv, 0, 0)).r;
                 float3 wCoord = mul(_lightToWorld, float4(lCoord, 1));
 
                 o.world = float4(wCoord, 1);
                 //o.world = float4(mul(_shadowToWorld[0], float4(texPos.xy, _edgeHeight, 1)).xyz, 1);
                 o.vertex = UnityObjectToClipPos(float4(o.world.xyz, 1));
+                float3 positionVS = mul(UNITY_MATRIX_V, o.world).xyz;
+                o.view = float4(positionVS, 1);
                 //o.vertex = mul(UNITY_MATRIX_VP, (float4(o.world.xyz, 1)));
                 //convert the vertex position from world space to clip space
                 o.triID = float4(triID, 0, vertexID, 0);
@@ -390,9 +415,15 @@ Shader "Unlit/LocalLightVolumeMesh"
                 float4 projected = mul(_cameraMatrix, float4(i.world.xyz, 1));
                 float2 uv = 1 - ((projected.xy / projected.w) * 0.5f + 0.5f);
 
-                float dist = distance(_WorldSpaceCameraPos, i.world.xyz);
+                //float dist = distance(_WorldSpaceCameraPos, i.world.xyz);
+                float dist = -i.view.z;
                 float depth = LinearEyeDepth(tex2D(_CameraDepthTexture, uv));
-                dist = clamp(dist, 0, depth);// dist > depth ? depth : dist;
+                float2 boxDepth = tex2D(_DownsampleTexture1, uv);
+                depth = min(depth, boxDepth.y);
+                dist = clamp(dist, boxDepth.x, depth);// dist > depth ? depth : dist;
+                //dist = clamp(dist, 0, depth);
+
+                dist = boxDepth.y == 0 ? 0 : dist;
 
                 //return facing > 0 ? float4(float(i.triID.z) / 6.0f, 0, 0, 1) : float4(0, float(i.triID.z) / 6.0f, 0, 1);
                 return facing > 0 ? float4(dist, 0, 0, 1) : float4(-dist, 0, 0, 1);

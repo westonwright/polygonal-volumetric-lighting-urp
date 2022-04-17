@@ -566,12 +566,15 @@ class MeshLightVolumePass : ScriptableRenderPass
         cmd.SetGlobalVector("_texelSizes", _texelSizes);
 
         cmd.SetGlobalVector("_lightDirection", shadowLight.light.transform.forward);
-        cmd.SetGlobalVector("_lightCameraChunk", _lightCameraChunk);
+        //cmd.SetGlobalVector("_lightCameraChunk", _lightCameraChunk);
 
-        cmd.SetGlobalFloat("_laplacianWorldSize", _baseTesselationMapWidth * _chunkSize);
-        cmd.SetGlobalFloat("_chunkWorldSize", _chunkSize);
+        cmd.SetGlobalVector("_centerOffset", new Vector3(_lightCameraChunk.x + (_chunkSize / 2f), _lightCameraChunk.y + (_chunkSize / 2f), 0));
+        cmd.SetGlobalVector("_laplacianWorldSize", new Vector2(_baseTesselationMapWidth * _chunkSize, _baseTesselationMapWidth * _chunkSize));
+        //cmd.SetGlobalFloat("_chunkWorldSize", _chunkSize);
         cmd.SetGlobalFloat("_depthBias", shadowData.bias[shadowLightIndex].x);
         cmd.SetGlobalFloat("_maxCascadeDepth", _maxCascadeDepth);
+        cmd.SetGlobalFloat("_maxLightDepth", _maxCascadeDepth);
+        cmd.SetGlobalFloat("_minLightDepth", -Mathf.Infinity);
 
         cmd.Blit(null, _localShadowTarget, _shadowSampleMaterial, 0);
 
@@ -716,7 +719,7 @@ class MeshLightVolumePass : ScriptableRenderPass
 
         cmd.SetComputeIntParam(_lightVolumeCompute, "_maxTesselation", _maxTesselation);
         cmd.SetComputeIntParam(_lightVolumeCompute, "_baseTesselationMapWidth", _baseTesselationMapWidth);
-        cmd.SetComputeFloatParams(_lightVolumeCompute, "_cameraChunkPos", new float[] { _lightCameraChunk.x, _lightCameraChunk.y } );
+        cmd.SetComputeVectorParam(_lightVolumeCompute, "_cameraLightPos", _lightCameraChunk);
         cmd.SetComputeFloatParam(_lightVolumeCompute, "_fovYRads", renderingData.cameraData.camera.fieldOfView * Mathf.Deg2Rad);
         cmd.SetComputeFloatParam(_lightVolumeCompute, "_distFactor", _distanceFactor);
         cmd.SetComputeIntParam(_lightVolumeCompute, "_maxLaplacianWidth", _maxLaplacianWidth);
@@ -773,15 +776,16 @@ class MeshLightVolumePass : ScriptableRenderPass
 
         _meshBlock.SetBuffer("_Quads", _emitQuadsBuffer);
         _meshBlock.SetBuffer("_Edges", _emitEdgesBuffer);
-        _meshBlock.SetMatrixArray("_worldToShadow", _mainLightShadowMatrices);
-        _meshBlock.SetMatrixArray("_shadowToWorld", _mainLightShadowMatricesInverse);
+        //_meshBlock.SetMatrixArray("_worldToShadow", _mainLightShadowMatrices);
+        //_meshBlock.SetMatrixArray("_shadowToWorld", _mainLightShadowMatricesInverse);
         _meshBlock.SetMatrix("_cameraMatrix", renderingData.cameraData.camera.nonJitteredProjectionMatrix * renderingData.cameraData.camera.transform.worldToLocalMatrix);
         _meshBlock.SetMatrix("_lightToWorld", shadowLight.localToWorldMatrix);
         _meshBlock.SetInteger("_maxTesselation", _maxTesselation);
         _meshBlock.SetInteger("_baseTesselationWidth", _baseTesselationMapWidth);
-        _meshBlock.SetFloat("_baseChunkScale", _chunkSize);
-        _meshBlock.SetVector("_cameraChunkPos", _lightCameraChunk);
+        _meshBlock.SetVector("_baseChunkScale", new Vector2(_chunkSize, _chunkSize));
+        _meshBlock.SetVector("_centerPos", _lightCameraChunk);
         _meshBlock.SetFloat("_edgeHeight", _edgeHeight);
+        /*
         _meshBlock.SetVector("_cascadeShadowSplitSphereRadiiNear", new Vector4(
             0,
             _cascadeSplitDistances[0].w,
@@ -792,10 +796,13 @@ class MeshLightVolumePass : ScriptableRenderPass
             _cascadeSplitDistances[1].w,
             _cascadeSplitDistances[2].w,
             _cascadeSplitDistances[3].w));
-        _meshBlock.SetVector("_texelSize", _texelSizes);
-        _meshBlock.SetVector("_lightDirection", shadowLight.light.transform.forward);
-        _meshBlock.SetFloat("_depthBias", shadowData.bias[shadowLightIndex].x);
-        _meshBlock.SetInteger("_cascadeCount", _shadowCasterCascadesCount);
+        */
+        //_meshBlock.SetVector("_texelSize", _texelSizes);
+        //_meshBlock.SetVector("_lightDirection", shadowLight.light.transform.forward);
+        //_meshBlock.SetFloat("_depthBias", shadowData.bias[shadowLightIndex].x);
+        //_meshBlock.SetInteger("_cascadeCount", _shadowCasterCascadesCount);
+        cmd.SetRenderTarget(_downsampleTemp1);
+        cmd.ClearRenderTarget(true, true, Color.green * Mathf.Infinity, 1f);
 
         cmd.SetRenderTarget(_downsampleTemp0);
         cmd.SetProjectionMatrix(renderingData.cameraData.camera.projectionMatrix);

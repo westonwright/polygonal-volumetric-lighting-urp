@@ -4,7 +4,7 @@ using UnityEngine.Rendering.Universal;
 using System.Collections.Generic;
 using System;
 
-public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
+public class MeshLightZonesRenderFeature : ScriptableRendererFeature
 {
 
     #region Public properties and methods
@@ -14,7 +14,7 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
         set { _renderPassEvent = value; }
     }
     [SerializeField]
-    RenderPassEvent _renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing;
+    RenderPassEvent _renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
 
     public float laplacianGaussianStandardDeviation
     {
@@ -58,23 +58,16 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
     [SerializeField]
     [Range(128, 4096)]
     int _maxLaplacianWidth = 512;
-
-    public int chunkSize
-    {
-        get { return _chunkSize; }
-        set { _chunkSize = value; }
-    }
-    [SerializeField]
-    int _chunkSize = 5;
     
-    public int chunksInRadius
+    // force to be even
+    public int chunksInWidth
     {
-        get { return _chunksInRadius; }
-        set { _chunksInRadius = value; }
+        get { return _chunksInWidth - (_chunksInWidth % 2); }
+        set { _chunksInWidth = value - (value % 2); }
     }
     [SerializeField]
-    [Range(1, 31)]
-    int _chunksInRadius = 5;
+    [Range(1, 64)]
+    int _chunksInWidth = 6;
     
     public int maxTesselation
     {
@@ -84,15 +77,6 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
     [SerializeField]
     [Range(1, 8)]
     int _maxTesselation = 4;
-    
-    public float edgeHeight
-    {
-        get { return _edgeHeight; }
-        set { _edgeHeight = value; }
-    }
-    [SerializeField]
-    [Range(.01f, 1024f)]
-    float _edgeHeight = 512f;
     
     public float distanceFactor
     {
@@ -208,6 +192,21 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
     [SerializeField]
     Color _extinctionColor = Color.black;
 
+    public void AddLightZone(LightZone lightZone)
+    {
+        if (!lightZones.Contains(lightZone))
+        {
+            lightZones.Add(lightZone);
+        }
+    }
+
+    public void RemoveLightZone(LightZone lightZone)
+    {
+        if (lightZones.Contains(lightZone))
+        {
+            lightZones.Remove(lightZone);
+        }
+    }
 
     #endregion
 
@@ -216,6 +215,8 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
     [SerializeField]
     Shader _shadowSampleShader;
     [SerializeField]
+    Shader _boxDepthShader;
+    [SerializeField]
     Shader _lightVolumeMeshShader;
     [SerializeField]
     Shader _atmosphereShader;
@@ -223,6 +224,7 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
     Shader _compositeShader;
 
     Material _shadowSampleMaterial;
+    Material _boxDepthMaterial;
     Material _lightVolumeMeshMaterial;
     Material _atmosphereMaterial;
     Material _compositeMaterial;
@@ -238,7 +240,12 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
     [SerializeField]
     ComputeShader _upsampleCompute;
 
-    MeshLightVolumePass _renderPass = null;
+    [SerializeField]
+    Mesh _cubeMesh;
+
+    List<LightZone> lightZones = new List<LightZone>();
+
+    MeshLightZonesPass _renderPass = null;
 
     bool _initialized = false;
     #endregion
@@ -247,6 +254,7 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
     {
         if(
             _shadowSampleShader == null ||
+            _boxDepthShader == null ||
             _lightVolumeMeshShader == null ||
             _atmosphereShader == null ||
             _compositeShader == null || 
@@ -254,7 +262,8 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
             _downsampleCompute == null ||
             _lightVolumeCompute == null ||
             _blurCompute == null ||
-            _upsampleCompute == null)
+            _upsampleCompute == null ||
+            _cubeMesh == null)
         {
             _initialized = false;
             return;
@@ -266,8 +275,11 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
         }
         
         _shadowSampleMaterial = new Material(_shadowSampleShader);
-        _shadowSampleMaterial.hideFlags = HideFlags.DontSave;   
-        
+        _shadowSampleMaterial.hideFlags = HideFlags.DontSave;
+
+        _boxDepthMaterial = new Material(_boxDepthShader);
+        _boxDepthMaterial.hideFlags = HideFlags.DontSave;
+
         _lightVolumeMeshMaterial = new Material(_lightVolumeMeshShader);
         _lightVolumeMeshMaterial.enableInstancing = true;
         _lightVolumeMeshMaterial.hideFlags = HideFlags.DontSave;
@@ -278,8 +290,9 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
         _compositeMaterial = new Material(_compositeShader);
         _compositeMaterial.hideFlags = HideFlags.DontSave;
 
-        _renderPass = new MeshLightVolumePass(
+        _renderPass = new MeshLightZonesPass(
             _shadowSampleMaterial,
+            _boxDepthMaterial,
             _lightVolumeMeshMaterial,
             _atmosphereMaterial,
             _compositeMaterial,
@@ -288,7 +301,8 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
             _lightVolumeCompute,
             _blurCompute,
             _upsampleCompute,
-            "MeshLightVolumePass"
+            _cubeMesh,
+            "MeshLightZonePass"
             );
         _renderPass.renderPassEvent = renderPassEvent;
 
@@ -314,11 +328,9 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
                     _renderPass.SetTarget(
                         laplacianGaussianStandardDeviation, 
                         laplacianKernelRadius, 
-                        maxLaplacianWidth, 
-                        chunkSize, 
-                        chunksInRadius, 
+                        maxLaplacianWidth,
+                        chunksInWidth, 
                         maxTesselation, 
-                        edgeHeight, 
                         distanceFactor, 
                         downsampleAmount, 
                         blurGaussianStandardDeviation, 
@@ -331,7 +343,8 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
                         fogDensity,
                         fogColor,
                         ambientColor,
-                        extinctionColor
+                        extinctionColor,
+                        lightZones.ToArray()
                         );
 
                     // Ask the renderer to add our pass.
@@ -354,6 +367,11 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
         {
             CoreUtils.Destroy(_shadowSampleMaterial);
             _shadowSampleMaterial = null;
+        }   
+        if (_boxDepthMaterial != null)
+        {
+            CoreUtils.Destroy(_boxDepthMaterial);
+            _boxDepthMaterial = null;
         }
         if(_lightVolumeMeshMaterial != null)
         {

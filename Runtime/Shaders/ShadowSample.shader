@@ -33,12 +33,15 @@ Shader "Unlit/ShadowSample"
             const float4 _texelSizes;
 
             const float3 _lightDirection;
-            const float3 _lightCameraChunk;
+            //const float3 _lightCameraChunk;
 
-            const float _laplacianWorldSize;
-            const float _chunkWorldSize;
+            const float3 _centerOffset;
+            const float2 _laplacianWorldSize;
+            //const float _chunkWorldSize;
             const float _depthBias;
             const float _maxCascadeDepth;
+            const float _maxLightDepth;
+            const float _minLightDepth;
 
             struct appdata
             {
@@ -57,6 +60,11 @@ Shader "Unlit/ShadowSample"
             Texture2D _MainLightShadowmapTexture;
             SamplerState my_point_clamp_sampler;
 
+            float2 MultiplyVectors(float2 vector1, float2 vector2) {
+                return float2(vector1.x * vector2.x, vector1.y * vector2.y);
+            }
+
+
             v2f vert (appdata v)
             {
                 v2f o;
@@ -72,7 +80,8 @@ Shader "Unlit/ShadowSample"
                 float4x4 _shadowToWorld[4] = { _shadowToWorld0, _shadowToWorld1, _shadowToWorld2, _shadowToWorld3};
 
                 // converts from uv space on the texture to world space in the light relative to the camera
-                float3 lightPosInit = float3(((i.uv - float2(.5f, .5f)) * _laplacianWorldSize), 0) + float3(_lightCameraChunk.xy + (float2(_chunkWorldSize, _chunkWorldSize) / 2.0f), 0);
+                //float3 lightPosInit = float3(((i.uv - float2(.5f, .5f)) * _laplacianWorldSize), 0) + float3(_lightCameraChunk.xy + (float2(_chunkWorldSize, _chunkWorldSize) / 2.0f), 0);
+                float3 lightPosInit = float3(MultiplyVectors((i.uv - float2(.5f, .5f)), _laplacianWorldSize), 0) + float3(_centerOffset.xy, 0);
                 // then to world space
                 float3 worldPosInit = mul(_lightToWorld, float4(lightPosInit, 1));
 
@@ -204,6 +213,8 @@ Shader "Unlit/ShadowSample"
                 float3 lCoord = mul(_worldToLight, float4(wCoord, 1)).xyz;
                 // whatever wasn't covered by any cascades is projected to the far plane of the light
                 lCoord.z = shadowSamples == 0 ? _maxCascadeDepth : lCoord.z;
+                lCoord.z = min(lCoord.z, _maxLightDepth);
+                lCoord.z = max(lCoord.z, _minLightDepth);
 
                 return float4(
                     lCoord.z, 0, 0,
