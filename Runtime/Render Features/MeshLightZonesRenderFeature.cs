@@ -310,7 +310,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
 
     private bool LoadShader(ref Shader shaderRefrence, string filePath, string fileName)
     {
-        //Debug.Log(_dataPath + _packageName + filePath + fileName);
+        Debug.Log(_dataPath + _packageName + filePath + fileName);
         shaderRefrence = (Shader)AssetDatabase.LoadAssetAtPath(_dataPath + _packageName + filePath + fileName, typeof(Shader));
         if (shaderRefrence == null)
         {
@@ -323,7 +323,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     
     private bool LoadCompute(ref ComputeShader computeRefrence, string filePath, string fileName)
     {
-        Debug.Log(_dataPath + _packageName + filePath + fileName);
+        //Debug.Log(_dataPath + _packageName + filePath + fileName);
         computeRefrence = (ComputeShader)AssetDatabase.LoadAssetAtPath(_dataPath + _packageName + filePath + fileName, typeof(ComputeShader));
         if (computeRefrence == null)
         {
