@@ -344,8 +344,10 @@ public class MeshLightVolumeRenderFeature : ScriptableRendererFeature
     private void OnDisable()
     {
         //Debug.Log("on disable");
-
-        _renderPass.DisposeBuffers();
+        if(_renderPass != null)
+        {
+            _renderPass.DisposeBuffers();
+        }
     }
 
     protected override void Dispose(bool disposing)

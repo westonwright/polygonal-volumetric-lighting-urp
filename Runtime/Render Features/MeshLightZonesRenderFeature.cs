@@ -3,10 +3,29 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using System.Collections.Generic;
 using System;
+using UnityEditor;
 
 public class MeshLightZonesRenderFeature : ScriptableRendererFeature
 {
+    #region Constant properties
+    const string _packageName = "com.weston-wright.polygonal-volumetric-lighting-urp";
+    const string _shadersPath = "/Runtime/Shaders/";
+    const string _computePath = "/Runtime/Compute/";
+    const string _shadowSampleShaderName = "ShadowSample.shader";
+    const string _boxDepthShaderName = "BoxMeshDepth.shader";
+    const string _mixDepthShaderName = "MixDepths.shader";
+    const string _lightVolumeMeshShaderName = "LightZoneMesh.shader";
+    const string _atmosphereShaderName = "Atmosphere.shader";
+    const string _downsamplePointShaderName = "DownsamplePoint.shader";
+    const string _compositeShaderName = "Composite.shader";
+    const string _laplacianComputeName = "Laplacian.compute";
+    const string _downsampleBufferComputeName = "DownsampleBuffer.compute";
+    const string _lightVolumeComputeName = "LocalLightVolume.compute";
+    const string _blurComputeName = "Blur.compute";
+    const string _upsampleComputeName = "Upsample.compute";
+    const string _cubeName = "Cube.fbx";
 
+    #endregion
     #region Public properties and methods
     public RenderPassEvent renderPassEvent
     {
@@ -120,7 +139,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
         set { _blurDepthFalloff = value; }
     }
     [SerializeField]
-    [Range(0, 1)]
+    //[Range(0, 1)]
     float _blurDepthFalloff = .01f;
     
     public float extinctionCoefficient
@@ -211,65 +230,135 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     #endregion
 
     #region Private properties
-
-    [SerializeField]
+    //[SerializeField]
     Shader _shadowSampleShader;
-    [SerializeField]
+    //[SerializeField]
     Shader _boxDepthShader;
-    [SerializeField]
+    //[SerializeField]
+    Shader _mixDepthShader;
+    //[SerializeField]
     Shader _lightVolumeMeshShader;
-    [SerializeField]
+    //[SerializeField]
     Shader _atmosphereShader;
-    [SerializeField]
+    //[SerializeField]
+    Shader _downsamplePointShader;
+    //[SerializeField]
     Shader _compositeShader;
 
     Material _shadowSampleMaterial;
     Material _boxDepthMaterial;
+    Material _mixDepthMaterial;
     Material _lightVolumeMeshMaterial;
     Material _atmosphereMaterial;
+    Material _downsamplePointMaterial;
     Material _compositeMaterial;
 
-    [SerializeField]
+    //[SerializeField]
     ComputeShader _laplacianCompute;
-    [SerializeField]
+    //[SerializeField]
     ComputeShader _downsampleCompute;
-    [SerializeField]
+    //[SerializeField]
     ComputeShader _lightVolumeCompute;
-    [SerializeField]
+    //[SerializeField]
     ComputeShader _blurCompute;
-    [SerializeField]
+    //[SerializeField]
     ComputeShader _upsampleCompute;
 
-    [SerializeField]
-    Mesh _cubeMesh;
+    //[SerializeField]
+    //Mesh _cubeMesh;
+    Mesh _cubeMesh = null;
 
     List<LightZone> lightZones = new List<LightZone>();
 
     MeshLightZonesPass _renderPass = null;
 
+    UniversalRenderPipelineAsset _pipeline;
+
+    string _dataPath;
+
     bool _initialized = false;
     #endregion
 
+    private bool Initialize()
+    {
+        _dataPath = GetDataPath();
+
+        if (!LoadShader(ref _shadowSampleShader, _shadersPath, _shadowSampleShaderName)) return false;
+        if (!LoadShader(ref _boxDepthShader, _shadersPath, _boxDepthShaderName)) return false;
+        if (!LoadShader(ref _lightVolumeMeshShader, _shadersPath, _lightVolumeMeshShaderName)) return false;
+        if (!LoadShader(ref _mixDepthShader, _shadersPath, _mixDepthShaderName)) return false;
+        if (!LoadShader(ref _atmosphereShader, _shadersPath, _atmosphereShaderName)) return false;
+        if (!LoadShader(ref _downsamplePointShader, _shadersPath, _downsamplePointShaderName)) return false;
+        if (!LoadShader(ref _compositeShader, _shadersPath, _compositeShaderName)) return false;
+        if (!LoadCompute(ref _laplacianCompute, _computePath, _laplacianComputeName)) return false;
+        if (!LoadCompute(ref _downsampleCompute, _computePath, _downsampleBufferComputeName)) return false;
+        if (!LoadCompute(ref _lightVolumeCompute, _computePath, _lightVolumeComputeName)) return false;
+        if (!LoadCompute(ref _blurCompute, _computePath, _blurComputeName)) return false;
+        if (!LoadCompute(ref _upsampleCompute, _computePath, _upsampleComputeName)) return false;
+        if (!LoadBuiltinMesh(ref _cubeMesh, _cubeName)) return false;
+
+        return true;
+    }
+
+    private string GetDataPath()
+    {
+        // detect if in packages or assets folder
+        string dataPath = Application.dataPath;
+        dataPath = dataPath.Substring(dataPath.LastIndexOf("/") + 1);
+        return dataPath + "/";
+    }
+
+    private bool LoadShader(ref Shader shaderRefrence, string filePath, string fileName)
+    {
+        //Debug.Log(_dataPath + _packageName + filePath + fileName);
+        shaderRefrence = (Shader)AssetDatabase.LoadAssetAtPath(_dataPath + _packageName + filePath + fileName, typeof(Shader));
+        if (shaderRefrence == null)
+        {
+            Debug.LogError("Missing Shader " + fileName + "! Package may be corrupted!");
+            Debug.LogError("Please reimport Package");
+            return false;
+        }
+        return true;
+    }
+    
+    private bool LoadCompute(ref ComputeShader computeRefrence, string filePath, string fileName)
+    {
+        //Debug.Log(_dataPath + _packageName + filePath + fileName);
+        computeRefrence = (ComputeShader)AssetDatabase.LoadAssetAtPath(_dataPath + _packageName + filePath + fileName, typeof(ComputeShader));
+        if (computeRefrence == null)
+        {
+            Debug.LogError("Missing Compute Shader " + fileName + "! Package may be corrupted!");
+            Debug.LogError("Please reimport Package");
+            return false;
+        }
+        return true;
+    }
+    private bool LoadBuiltinMesh(ref Mesh meshRefrence, string fileName)
+    {
+        meshRefrence = Resources.GetBuiltinResource<Mesh>(fileName);
+        if (meshRefrence == null)
+        {
+            Debug.LogError("Missing Builtin Resource " + fileName);
+            Debug.LogError("Please reimport Builtin Resourcs");
+            return false;
+        }
+        return true;
+    }
+
     public override void Create()
     {
-        if(
-            _shadowSampleShader == null ||
-            _boxDepthShader == null ||
-            _lightVolumeMeshShader == null ||
-            _atmosphereShader == null ||
-            _compositeShader == null || 
-            _laplacianCompute == null || 
-            _downsampleCompute == null ||
-            _lightVolumeCompute == null ||
-            _blurCompute == null ||
-            _upsampleCompute == null ||
-            _cubeMesh == null)
+        _initialized = Initialize();
+        if (!_initialized) return;
+
+        _pipeline = ((UniversalRenderPipelineAsset)GraphicsSettings.renderPipelineAsset);
+        if (!_pipeline.supportsCameraDepthTexture)
         {
-            _initialized = false;
+            Debug.LogError("Camera Depth Texture not supported on Universal Render Pipeline Asset!");
+            Debug.LogError("Please enable Camera Depth Texture to use Volumetric Lighting!");
             return;
         }
 
-        if(_renderPass != null)
+        if (_renderPass != null)
         {
             _renderPass.DisposeBuffers();
         }
@@ -284,8 +373,14 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
         _lightVolumeMeshMaterial.enableInstancing = true;
         _lightVolumeMeshMaterial.hideFlags = HideFlags.DontSave;
 
+        _mixDepthMaterial = new Material(_mixDepthShader);
+        _mixDepthMaterial.hideFlags = HideFlags.DontSave;
+
         _atmosphereMaterial = new Material(_atmosphereShader);
         _atmosphereMaterial.hideFlags = HideFlags.DontSave;
+        
+        _downsamplePointMaterial = new Material(_downsamplePointShader);
+        _downsamplePointMaterial.hideFlags = HideFlags.DontSave;
 
         _compositeMaterial = new Material(_compositeShader);
         _compositeMaterial.hideFlags = HideFlags.DontSave;
@@ -294,7 +389,9 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
             _shadowSampleMaterial,
             _boxDepthMaterial,
             _lightVolumeMeshMaterial,
+            _mixDepthMaterial,
             _atmosphereMaterial,
+            _downsamplePointMaterial,
             _compositeMaterial,
             _laplacianCompute,
             _downsampleCompute,
@@ -357,8 +454,10 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     private void OnDisable()
     {
         //Debug.Log("on disable");
-
-        _renderPass.DisposeBuffers();
+        if(_renderPass != null)
+        {
+            _renderPass.DisposeBuffers();
+        }
     }
 
     protected override void Dispose(bool disposing)
@@ -378,11 +477,20 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
             CoreUtils.Destroy(_lightVolumeMeshMaterial);
             _lightVolumeMeshMaterial = null;
         }
-        
-        if(_atmosphereMaterial != null)
+        if (_mixDepthMaterial != null)
+        {
+            CoreUtils.Destroy(_mixDepthMaterial);
+            _mixDepthMaterial = null;
+        }
+        if (_atmosphereMaterial != null)
         {
             CoreUtils.Destroy(_atmosphereMaterial);
             _atmosphereMaterial = null;
+        }
+        if (_downsamplePointMaterial != null)
+        {
+            CoreUtils.Destroy(_downsamplePointMaterial);
+            _downsamplePointMaterial = null;
         }
         if(_compositeMaterial != null)
         {

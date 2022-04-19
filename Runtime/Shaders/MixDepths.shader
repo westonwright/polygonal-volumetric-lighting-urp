@@ -1,4 +1,4 @@
-Shader "Unlit/BoxDepth"
+Shader "Hidden/MixDepths"
 {
     Properties
     {
@@ -6,69 +6,16 @@ Shader "Unlit/BoxDepth"
     }
     SubShader
     {
-        Tags { "RenderType"="Opaque" }
-        LOD 100
-
-        Pass
-        {
-            Name "BoxDepth"
-
-            Cull Off
-            Blend One One
-            ZWrite Off
-
-            CGPROGRAM
-            #pragma vertex vert
-            #pragma fragment frag
-
-            #include "UnityCG.cginc"
-
-            const float4x4 _cameraMatrix;
-
-            sampler2D _MainTex;
-            float4 _MainTex_ST;
-
-            struct appdata
-            {
-                float4 vertex : POSITION;
-            };
-
-            struct v2f
-            {
-                float4 vertex : SV_POSITION;
-                float4 positionVS: TEXCOORD1;
-            };
-
-            v2f vert (appdata v)
-            {
-                v2f o;
-                o.vertex = UnityObjectToClipPos(v.vertex);
-                float3 positionWS = mul(UNITY_MATRIX_M, float4(v.vertex.xyz, 1.0)).xyz;
-                float3 positionVS = mul(UNITY_MATRIX_V, float4(positionWS, 1.0)).xyz;
-                o.positionVS = float4(positionVS, 1);
-               return o;
-            }
-
-            fixed4 frag (v2f i, fixed facing : VFACE) : SV_Target
-            {
-                float fragmentEyeDepth = -i.positionVS.z;
-
-                return facing < 0 ? float4(fragmentEyeDepth, 0, 0, 0) : float4(0, fragmentEyeDepth, 0, 0);
-            }
-            ENDCG
-        }
+        // No culling or depth
+        Cull Off ZWrite Off ZTest Always
             
         Pass
         {
-            Name "Inverse"
-
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
 
             #include "UnityCG.cginc"
-
-            const float4x4 _cameraMatrix;
 
             sampler2D _MainTex;
             float4 _MainTex_ST;

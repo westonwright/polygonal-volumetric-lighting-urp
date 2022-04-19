@@ -1,4 +1,4 @@
-Shader "Unlit/ShadowSample"
+Shader "Hidden/ShadowSample"
 {
     Properties
     {

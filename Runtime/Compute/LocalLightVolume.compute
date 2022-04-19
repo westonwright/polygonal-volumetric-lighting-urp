@@ -263,7 +263,7 @@ void InitializeCountsBuffer(uint id : SV_DispatchThreadID)
     _CountsBuffer[0] = _baseTesselationMapSize;
     _CountsBuffer[1] = 0u;
     _CountsBuffer[2] = 0u;
-    _CountsBuffer[3] = 1u;
+    _CountsBuffer[3] = 0u;
 }
 
 [numthreads(1, 1, 1)]
