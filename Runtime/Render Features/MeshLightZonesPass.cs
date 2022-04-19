@@ -71,6 +71,9 @@ class MeshLightZonesPass : ScriptableRenderPass
 
     int _downsampleTemp1Id;
     RenderTargetIdentifier _downsampleTemp1;
+    
+    int _downsampleTemp2Id;
+    RenderTargetIdentifier _downsampleTemp2;
 
     int _localShadowTargetId;
     RenderTargetIdentifier _localShadowTarget;
@@ -166,6 +169,7 @@ class MeshLightZonesPass : ScriptableRenderPass
         _temp1Id = Shader.PropertyToID("_TempTexture1");
         _downsampleTemp0Id = Shader.PropertyToID("_DownsampleTexture0");
         _downsampleTemp1Id = Shader.PropertyToID("_DownsampleTexture1");
+        _downsampleTemp2Id = Shader.PropertyToID("_DownsampleTexture2");
         _localShadowTargetId = Shader.PropertyToID("_LocalShadowTexture");
 
         _boxBlock = new MaterialPropertyBlock();
@@ -344,10 +348,11 @@ class MeshLightZonesPass : ScriptableRenderPass
         _maxQuadSize = Mathf.RoundToInt(Mathf.Pow(Mathf.RoundToInt(_chunksInWidth * Mathf.Pow(2, _maxTesselation)), 2));
         _totalTesselationSize = Mathf.CeilToInt(((_maxQuadSize / 3) * 4) / 16f); // + 1;
         // why divide here?
-        _maxQuadSize /= 4;
+        // find better way to reduce size than just dividing randomly
+        //_maxQuadSize /= 4;
 
         _maxEdgeSize = Mathf.RoundToInt(_chunksInWidth * Mathf.Pow(2, _maxTesselation)) * 4;
-        _maxEdgeSize /= 4;
+        //_maxEdgeSize /= 4;
 
         _totalLaplacianSize = Mathf.FloorToInt(Mathf.Pow(_maxLaplacianWidth, 2) / 3f) * 4;
         _laplacianLevels = Mathf.RoundToInt(Mathf.Log(_maxLaplacianWidth, 2)) - 1; //goes from max width down to 2
@@ -391,6 +396,10 @@ class MeshLightZonesPass : ScriptableRenderPass
             cmd.GetTemporaryRT(_downsampleTemp1Id, downsampleDescriptor);
             _downsampleTemp1 = new RenderTargetIdentifier(_downsampleTemp1Id);
             ConfigureTarget(_downsampleTemp1);
+            
+            cmd.GetTemporaryRT(_downsampleTemp2Id, downsampleDescriptor);
+            _downsampleTemp2 = new RenderTargetIdentifier(_downsampleTemp2Id);
+            ConfigureTarget(_downsampleTemp2);
         }
         else
         {
@@ -412,6 +421,10 @@ class MeshLightZonesPass : ScriptableRenderPass
             cmd.GetTemporaryRT(_downsampleTemp1Id, dummyDescriptor);
             _downsampleTemp1 = new RenderTargetIdentifier(_downsampleTemp1Id);
             ConfigureTarget(_downsampleTemp1);
+            
+            cmd.GetTemporaryRT(_downsampleTemp2Id, dummyDescriptor);
+            _downsampleTemp1 = new RenderTargetIdentifier(_downsampleTemp2Id);
+            ConfigureTarget(_downsampleTemp2);
         }
 
         // can use the green channel on this to tell laplacian texture to ignore parts if desired
@@ -424,16 +437,19 @@ class MeshLightZonesPass : ScriptableRenderPass
         /*
         _outTarget = new RenderTargetIdentifier[10];
         _outTargetID = new int[8];
-        for(int i = 0; i < 8; i++)
+        int c = _chunksInWidth;
+        for (int i = 0; i < 8; i++)
         {
             _outTargetID[i] = Shader.PropertyToID("_Out" + i);
-            RenderTextureDescriptor outDescriptor = new RenderTextureDescriptor(_baseTesselationMapWidth, _baseTesselationMapWidth, RenderTextureFormat.RGFloat);
+            RenderTextureDescriptor outDescriptor = new RenderTextureDescriptor(c, c, RenderTextureFormat.RGFloat);
             outDescriptor.enableRandomWrite = true;
             cmd.GetTemporaryRT(_outTargetID[i], outDescriptor);
             _outTarget[i] = new RenderTargetIdentifier(_outTargetID[i]);
             ConfigureTarget(_outTarget[i]);
-            
-            _baseTesselationMapWidth *= 2;
+            cmd.SetRenderTarget(_outTarget[i]);
+            cmd.ClearRenderTarget(true, true, Color.clear);
+
+            c *= 2;
         }
         */
         ConfigureClear(ClearFlag.All, Color.clear);
@@ -677,6 +693,8 @@ class MeshLightZonesPass : ScriptableRenderPass
             int prepareNextKernel = _lightVolumeCompute.FindKernel("PrepareNextLoop");
             int projectionPass = _lightVolumeMeshMaterial.FindPass("ProjectionMeshPass");
             int edgePass = _lightVolumeMeshMaterial.FindPass("EdgeMeshPass");
+            int boxDepthPass = _boxDepthMaterial.FindPass("BoxDepth");
+            int inverseBoxDepthPass = _boxDepthMaterial.FindPass("Inverse");
 
             // pre-calculate any data the mesh compute shader will need for each level of tesselation
             if (_depthDataArray == null)
@@ -824,7 +842,7 @@ class MeshLightZonesPass : ScriptableRenderPass
 
             _boxBlock.SetMatrix("_cameraMatrix", renderingData.cameraData.camera.nonJitteredProjectionMatrix * renderingData.cameraData.camera.transform.worldToLocalMatrix);
 
-            cmd.DrawMesh(_cubeMesh, Matrix4x4.TRS(_lightZoneBounds.Value.center, Quaternion.identity, _lightZoneBounds.Value.size), _boxDepthMaterial, 0, 0, _boxBlock);
+            cmd.DrawMesh(_cubeMesh, Matrix4x4.TRS(_lightZoneBounds.Value.center, Quaternion.identity, _lightZoneBounds.Value.size), _boxDepthMaterial, 0, boxDepthPass, _boxBlock);
 
             _meshBlock.SetBuffer("_Quads", _emitQuadsBuffer);
             _meshBlock.SetBuffer("_Edges", _emitEdgesBuffer);
@@ -836,9 +854,9 @@ class MeshLightZonesPass : ScriptableRenderPass
             _meshBlock.SetVector("_centerPos", _posInLight);
             _meshBlock.SetFloat("_edgeHeight", boundsInLight.extents.z);
 
-            cmd.SetRenderTarget(_downsampleTemp0);
-            cmd.ClearRenderTarget(true, true, Color.clear, 1f);
 
+            cmd.SetRenderTarget(_downsampleTemp2);
+            cmd.ClearRenderTarget(true, true, Color.clear, 1f);
             // switch to dispatching compute shaders indirectly to limit number of unnecessary draw calls.
             for (int i = 0; i < _maxTesselation; i++)
             {
@@ -859,6 +877,8 @@ class MeshLightZonesPass : ScriptableRenderPass
 
                 cmd.DrawProceduralIndirect(Matrix4x4.identity, _lightVolumeMeshMaterial, edgePass, MeshTopology.Triangles, _edgeArgsBuffer, 0, _meshBlock);
             }
+            cmd.Blit(_downsampleTemp1, _downsampleTemp0, _boxDepthMaterial, inverseBoxDepthPass);
+
             // atmosphere
             cmd.SetGlobalMatrix("_cameraInverseProjection", renderingData.cameraData.camera.projectionMatrix.inverse);
             cmd.SetGlobalMatrix("_cameraToWorld", renderingData.cameraData.camera.cameraToWorldMatrix);
@@ -957,9 +977,10 @@ class MeshLightZonesPass : ScriptableRenderPass
         cmd.ReleaseTemporaryRT(_temp1Id);
         cmd.ReleaseTemporaryRT(_downsampleTemp0Id);
         cmd.ReleaseTemporaryRT(_downsampleTemp1Id);
+        cmd.ReleaseTemporaryRT(_downsampleTemp2Id);
 
         /*
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < _outTargetID.Length; i++)
         {
             cmd.ReleaseTemporaryRT(_outTargetID[i]);
         }

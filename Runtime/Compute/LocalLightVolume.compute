@@ -249,10 +249,8 @@ void InitializeEdgeBuffers(uint id : SV_DispatchThreadID)
     {
         return;
     }
-    
-    uint maxEdgeLength = _baseTesselationMapWidth * pow(2u, _maxTesselation) * 4u;
-    
-    for (uint l = 0u; l < maxEdgeLength; l++)
+        
+    for (uint l = 0u; l < _maxEdgeSize; l++)
     {
         _EmitEdges[l] = 0u;
     }
@@ -350,6 +348,7 @@ void ComputeLevel(uint id : SV_DispatchThreadID)
                 
                 //_EmitEdges[edgeIndex] = uint2(quad.x | (i << 30u), quad.y);
                 _EmitEdges[edgeIndex] = quad | (i << 18u);
+                //_OutputTex[coords] += float2(0.5f, 0);
             }
             mask <<= 1;
         }

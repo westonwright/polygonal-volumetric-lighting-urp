@@ -6,7 +6,7 @@ using UnityEngine.Rendering.Universal;
 using System.Reflection;
 using System.Linq;
 
-//[ExecuteAlways]
+[ExecuteAlways]
 public class LightZone : MonoBehaviour
 {
     [SerializeField]
@@ -56,20 +56,16 @@ public class LightZone : MonoBehaviour
         }
     }
 
-    // Start is called before the first frame update
-    void Start()
+    private void OnEnable()
     {
         Initialize();
-        if (Application.isPlaying)
+        UpdateBounds();
+
+        ExtractRenderFeature();
+
+        if (meshLightZonesRenderFeature != null)
         {
-            UpdateBounds();
-
-            ExtractRenderFeature();
-
-            if(meshLightZonesRenderFeature != null)
-            {
-                meshLightZonesRenderFeature.AddLightZone(this);
-            }
+            meshLightZonesRenderFeature.AddLightZone(this);
         }
     }
 
@@ -102,6 +98,10 @@ public class LightZone : MonoBehaviour
 
     public Bounds? GetBounds()
     {
+        if(trueBounds == null)
+        {
+            UpdateBounds();
+        }
         return trueBounds;
     }
 }

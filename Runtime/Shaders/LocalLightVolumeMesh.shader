@@ -43,8 +43,9 @@ Shader "Unlit/LocalLightVolumeMesh"
     sampler2D _LocalShadowTexture;
     sampler2D _CameraDepthTexture;
 
-    sampler2D _DownsampleTexture1;
-    
+    Texture2D _DownsampleTexture1;
+    SamplerState my_point_clamp_sampler;
+
     // could replace with just reading values directly from quad but might need to swap x and y
     static const float2 TranslationTable[4] = { 
         float2(0, 0), 
@@ -208,7 +209,7 @@ Shader "Unlit/LocalLightVolumeMesh"
                 float3 triPos = QuadTriTable[(posInParent * 24) + (neighbors * 6) + vertexID];
 
                 float3 lCoord = float3(((triPos.xy * quadScale) + offset.xy), 0);
-                float2 uv = DivideVectors((lCoord.xy - (_centerPos.xy - (_baseChunkScale * (_baseTesselationWidth / 2)))), (_baseChunkScale * _baseTesselationWidth));
+                float2 uv = DivideVectors((lCoord.xy - (_centerPos.xy - (_baseChunkScale * (_baseTesselationWidth / 2)))), (_baseChunkScale * _baseTesselationWidth)) + float2(.001f, .001f);
                 lCoord.z = tex2Dlod(_LocalShadowTexture, float4(uv, 0, 0)).r;
                 float3 wCoord = mul(_lightToWorld, float4(lCoord, 1));
 
@@ -239,18 +240,23 @@ Shader "Unlit/LocalLightVolumeMesh"
                 float4 projected = mul(_cameraMatrix, float4(i.world.xyz, 1));
                 float2 uv = 1 - ((projected.xy / projected.w) * 0.5f + 0.5f);
 
-                //float dist = distance(_WorldSpaceCameraPos, i.world.xyz);
-                float dist = -i.view.z;
+                float trueDist = -i.view.z;
+                float dist = trueDist;
                 float depth = LinearEyeDepth(tex2D(_CameraDepthTexture, uv));
-                float2 boxDepth = tex2D(_DownsampleTexture1, uv);
-                depth = min(depth, boxDepth.y);
-                dist = clamp(dist, boxDepth.x, depth);// dist > depth ? depth : dist;
-                //dist = clamp(dist, 0, depth);
+                float2 boxDepth = _DownsampleTexture1.Sample(my_point_clamp_sampler, uv);
+                depth = min(depth, boxDepth.x);
+                dist = clamp(dist, 0, depth);
 
-                dist = boxDepth.y == 0 ? 0 : dist;
+                int face = dist < boxDepth.y - .05f ? 0 : 1;
+                face *= facing > 0 ? 1 : -1;
+
+                dist = dist < boxDepth.y - .05f ? 0 : dist;
 
                 //return facing > 0 ? float4(float(i.triID.z) / 6.0f, 0, 0, 1) : float4(0, float(i.triID.z) / 6.0f, 0, 1);
-                return facing > 0 ? float4(dist, 0, 0, 1) : float4(-dist, 0, 0, 1);
+                float4 color = float4(0, 0, 0, 0);
+                color.x = dist * sign(facing);
+                color.y = face;
+                return color;
             }
             ENDCG
         }
@@ -333,6 +339,7 @@ Shader "Unlit/LocalLightVolumeMesh"
                 // this is the ceiling piece
                 //if (edge.x == 0u)
                 if ((edge & 0x0003FFFF) == 0u)
+                //if (edge == 0u)
                 {
                     float3 texPos = float3((EdgeTriTable[vertexID].xy * (_baseChunkScale * _baseTesselationWidth)) + parentOffset, _centerPos.z - _edgeHeight);
 
@@ -386,7 +393,7 @@ Shader "Unlit/LocalLightVolumeMesh"
                 //triPos.z *= _edgeHeight;
 
                 float3 lCoord = float3(((triPos.xy * edgeScale) + offset.xy), 0);
-                float2 uv = DivideVectors((lCoord.xy - (_centerPos.xy - (_baseChunkScale * (_baseTesselationWidth / 2)))), (_baseChunkScale * _baseTesselationWidth));
+                float2 uv = DivideVectors((lCoord.xy - (_centerPos.xy - (_baseChunkScale * (_baseTesselationWidth / 2)))), (_baseChunkScale * _baseTesselationWidth)) + float2(.001f, .001f);
                 lCoord.z = triPos.z > 0 ? _centerPos.z - _edgeHeight : tex2Dlod(_LocalShadowTexture, float4(uv, 0, 0)).r;
                 float3 wCoord = mul(_lightToWorld, float4(lCoord, 1));
 
@@ -415,18 +422,22 @@ Shader "Unlit/LocalLightVolumeMesh"
                 float4 projected = mul(_cameraMatrix, float4(i.world.xyz, 1));
                 float2 uv = 1 - ((projected.xy / projected.w) * 0.5f + 0.5f);
 
-                //float dist = distance(_WorldSpaceCameraPos, i.world.xyz);
                 float dist = -i.view.z;
                 float depth = LinearEyeDepth(tex2D(_CameraDepthTexture, uv));
-                float2 boxDepth = tex2D(_DownsampleTexture1, uv);
-                depth = min(depth, boxDepth.y);
-                dist = clamp(dist, boxDepth.x, depth);// dist > depth ? depth : dist;
-                //dist = clamp(dist, 0, depth);
+                float2 boxDepth = _DownsampleTexture1.Sample(my_point_clamp_sampler, uv);
+                depth = min(depth, boxDepth.x);
+                dist = clamp(dist, 0, depth);
 
-                dist = boxDepth.y == 0 ? 0 : dist;
+                int face = dist < boxDepth.y - .05f ? 0 : 1;
+                face *= facing > 0 ? 1 : -1;
+
+                dist = dist < boxDepth.y - .05f ? 0 : dist;
 
                 //return facing > 0 ? float4(float(i.triID.z) / 6.0f, 0, 0, 1) : float4(0, float(i.triID.z) / 6.0f, 0, 1);
-                return facing > 0 ? float4(dist, 0, 0, 1) : float4(-dist, 0, 0, 1);
+                float4 color = float4(0, 0, 0, 0);
+                color.x = dist * sign(facing);
+                color.y = face;
+                return color;
             }
             ENDCG
         }

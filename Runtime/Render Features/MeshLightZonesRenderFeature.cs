@@ -66,7 +66,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
         set { _chunksInWidth = value - (value % 2); }
     }
     [SerializeField]
-    [Range(1, 64)]
+    [Range(2, 64)]
     int _chunksInWidth = 6;
     
     public int maxTesselation
