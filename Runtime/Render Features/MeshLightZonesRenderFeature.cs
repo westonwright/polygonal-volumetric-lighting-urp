@@ -303,14 +303,27 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     private string GetDataPath()
     {
         // detect if in packages or assets folder
-        string dataPath = Application.dataPath;
-        dataPath = dataPath.Substring(dataPath.LastIndexOf("/") + 1);
-        return dataPath + "/";
+        string dataPath = "Packages/";
+#if UNITY_EDITOR
+        var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+        var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(assembly);
+        if (packageInfo != null)
+        {
+            dataPath = "Packages/";
+            //Debug.Log("In package " + packageInfo.name);
+        }
+        else
+        {
+            dataPath = "Assets/";
+            //Debug.Log("Not in package");
+        }
+#endif  
+        return dataPath;
     }
 
     private bool LoadShader(ref Shader shaderRefrence, string filePath, string fileName)
     {
-        Debug.Log(_dataPath + _packageName + filePath + fileName);
+        //Debug.Log(_dataPath + _packageName + filePath + fileName);
         shaderRefrence = (Shader)AssetDatabase.LoadAssetAtPath(_dataPath + _packageName + filePath + fileName, typeof(Shader));
         if (shaderRefrence == null)
         {
