@@ -310,12 +310,12 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
         if (packageInfo != null)
         {
             dataPath = "Packages/";
-            Debug.Log("In package " + packageInfo.name);
+            //Debug.Log("In package " + packageInfo.name);
         }
         else
         {
             dataPath = "Assets/";
-            Debug.Log("Not in package");
+            //Debug.Log("Not in package");
         }
 #endif  
         return dataPath;
@@ -323,7 +323,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
 
     private bool LoadShader(ref Shader shaderRefrence, string filePath, string fileName)
     {
-        Debug.Log(_dataPath + _packageName + filePath + fileName);
+        //Debug.Log(_dataPath + _packageName + filePath + fileName);
         shaderRefrence = (Shader)AssetDatabase.LoadAssetAtPath(_dataPath + _packageName + filePath + fileName, typeof(Shader));
         if (shaderRefrence == null)
         {
