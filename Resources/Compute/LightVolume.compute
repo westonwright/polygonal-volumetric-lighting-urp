@@ -14,7 +14,6 @@
 
 static const uint numThreads = 1024;
 
-//Texture2D<float> _LaplacianTexture; // updated for each ping pong based on which level is optimal
 //RWTexture2D<float2> _OutputTex;
 Buffer<uint> _LaplacianTextures;
 

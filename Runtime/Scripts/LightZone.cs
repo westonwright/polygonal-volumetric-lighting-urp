@@ -10,9 +10,11 @@ using System.Linq;
 public class LightZone : MonoBehaviour
 {
     [SerializeField]
-    private Vector3 offset = Vector3.zero;
+    private Vector3 Offset = Vector3.zero;
+    public Vector3 offset { get { return Offset; } }
     [SerializeField]
-    private Vector3 scale = Vector3.one;
+    private Vector3 Scale = Vector3.one;
+    public Vector3 scale { get { return Scale; } }
 
     //if gizmos should be drawn
     [SerializeField]
@@ -40,7 +42,7 @@ public class LightZone : MonoBehaviour
                 UpdateBounds();
             }
             //BoxCollider col = GetComponent<BoxCollider>();
-            Gizmos.matrix = Matrix4x4.TRS(transform.position, transform.rotation, Vector3.one);
+            Gizmos.matrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.localScale);
             Gizmos.color = GizmoColor;
             //Gizmos.DrawWireCube(HelperFunctions.MultiplyVectors(transform.localScale, col.center), HelperFunctions.MultiplyVectors(transform.localScale, col.size));
             Gizmos.DrawWireCube(zoneBounds.Value.center, zoneBounds.Value.size);
@@ -91,9 +93,28 @@ public class LightZone : MonoBehaviour
     }
 
     public void UpdateBounds()
-    {   
-        zoneBounds = new Bounds(offset, scale);
-        trueBounds = new Bounds(transform.position + offset, scale);
+    {
+        Vector3 halfScale = Scale / 2.0f;
+        zoneBounds = new Bounds(Offset, Scale);
+        Vector3 min = Vector3.positiveInfinity;
+        Vector3 max = Vector3.negativeInfinity;
+        Vector3[] points = new Vector3[]
+        {
+            Offset + new Vector3(halfScale.x, halfScale.y, halfScale.z),
+            Offset + new Vector3(-halfScale.x, halfScale.y, halfScale.z),
+            Offset + new Vector3(halfScale.x, -halfScale.y, halfScale.z),
+            Offset + new Vector3(halfScale.x, halfScale.y, -halfScale.z),
+            Offset + new Vector3(-halfScale.x, -halfScale.y, halfScale.z),
+            Offset + new Vector3(halfScale.x, -halfScale.y, -halfScale.z),
+            Offset + new Vector3(-halfScale.x, halfScale.y, -halfScale.z),
+            Offset + new Vector3(-halfScale.x, -halfScale.y, -halfScale.z),
+        };
+        for(int i = 0; i < 8; i++)
+        {
+            points[i] = transform.TransformPoint(points[i]);
+        }
+        trueBounds = GeometryUtility.CalculateBounds(points, Matrix4x4.identity);
+        //trueBounds = new Bounds(transform.position + offset, scale);
     }
 
     public Bounds? GetBounds()

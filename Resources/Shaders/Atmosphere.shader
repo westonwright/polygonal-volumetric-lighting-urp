@@ -32,7 +32,8 @@ Shader "Hidden/Atmosphere"
 
             sampler2D _MainTex;
             float4 _MainTex_ST;
-            sampler2D _CameraDepthTexture;
+            //sampler2D _CameraDepthTexture;
+            sampler2D _CameraDepthTextureDownsampled;
 
             const float4x4 _cameraInverseProjection;
             const float4x4 _cameraToWorld;
@@ -106,7 +107,7 @@ Shader "Hidden/Atmosphere"
                 rayDirection = mul(_cameraToWorld, float4(rayDirection, 0.0f)).xyz;
                 rayDirection = normalize(rayDirection);
 
-                float sceneDepth = min(LinearEyeDepth(tex2D(_CameraDepthTexture, i.uv).x), _maxDepth);
+                float sceneDepth = min(LinearEyeDepth(tex2D(_CameraDepthTextureDownsampled, i.uv).x), _maxDepth);
                 float transmittance = BeerLaw(_extinctionCoef, sceneDepth);
                 float lightDot = dot(-_lightDirection, rayDirection);
                 float lightDotSq = lightDot * lightDot;

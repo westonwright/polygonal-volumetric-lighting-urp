@@ -9,7 +9,6 @@ Shader "Hidden/LightZoneMesh"
     #include "UnityCG.cginc"
     #include "../Shaders/Includes/LookupTables.cginc"       
 
-    const float4x4 _cameraMatrix;
     const float4x4 _lightToWorld;
     const uint _maxTesselation;
     const uint _baseTesselationWidth;
@@ -21,13 +20,12 @@ Shader "Hidden/LightZoneMesh"
     float4 _MainTex_ST;
 
     sampler2D _LocalShadowTexture;
-    sampler2D _CameraDepthTexture;
+    sampler2D _CameraDepthTextureDownsampled;
 
-    Texture2D _DownsampleTexture1;
+    Texture2D _BoxDepthTexture;
     SamplerState my_point_clamp_sampler;
     
-    uint GetTesselationDepth(uint quad)
-    {
+    uint GetTesselationDepth(uint quad) {
         uint depthKey = quad & 0x0003FFFF;
         uint tesselationDepth = _maxTesselation;
         uint shift = tesselationDepth * 2u;
@@ -149,13 +147,10 @@ Shader "Hidden/LightZoneMesh"
         return float4(mul(_lightToWorld, float4(lCoord, 1)).xyz, 1);
     }
 
-    float4 CalculateFragColor(float4 worldPos, float distance, float facing){
-        float4 projected = mul(_cameraMatrix, float4(worldPos.xyz, 1));
-        float2 uv = 1 - ((projected.xy / projected.w) * 0.5f + 0.5f);
-
+    float4 CalculateFragColor(float4 worldPos, float2 uv, float distance, float facing){
         float dist = distance;
-        float depth = LinearEyeDepth(tex2D(_CameraDepthTexture, uv));
-        float2 boxDepth = _DownsampleTexture1.Sample(my_point_clamp_sampler, uv);
+        float depth = LinearEyeDepth(tex2D(_CameraDepthTextureDownsampled, uv));
+        float2 boxDepth = _BoxDepthTexture.Sample(my_point_clamp_sampler, uv);
         depth = min(depth, boxDepth.x);
         dist = clamp(dist, 0, depth);
 
@@ -177,12 +172,11 @@ Shader "Hidden/LightZoneMesh"
         Tags { "RenderType" = "Transparent" }
         //LOD 100
         
-        Cull Off
-        Blend One One
-        ZWrite Off
-        
         Pass
         {
+            Cull Off
+            Blend One One
+            ZWrite Off
             Name "ProjectionMeshPass"
 
             CGPROGRAM
@@ -193,8 +187,9 @@ Shader "Hidden/LightZoneMesh"
             {
                 //w determines if should be rendered or not
                 float4 vertex : SV_POSITION;
-                float4 world : TEXCOORD0;
-                float4 view : TEXCOORD1;
+                float4 screen : TEXCOORD0;
+                float4 world : TEXCOORD1;
+                float4 view : TEXCOORD2;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -209,12 +204,14 @@ Shader "Hidden/LightZoneMesh"
                 o.world = CalculateQuadWorldPos(_Quads[instanceID], vertexID);;
                 o.vertex = UnityObjectToClipPos(float4(o.world.xyz, 1));
                 o.view = float4(mul(UNITY_MATRIX_V, o.world).xyz, 1);
+                o.screen = ComputeScreenPos(o.vertex);
                 return o;
             }
 
             fixed4 frag(v2f i, fixed facing : VFACE) : SV_Target
             {
-                float4 color = CalculateFragColor(i.world, -i.view.z, facing);
+                float2 uv = i.screen.xy / i.screen.w;
+                float4 color = CalculateFragColor(i.world, uv, -i.view.z, facing);
                 return color;
             }
 
@@ -223,6 +220,10 @@ Shader "Hidden/LightZoneMesh"
         
         Pass
         {
+            Cull Back
+            BlendOp Min
+            Blend One One
+            ZWrite Off
             Name "ProjectionMeshDebugPass"
 
             CGPROGRAM
@@ -233,8 +234,9 @@ Shader "Hidden/LightZoneMesh"
             {
                 //w determines if should be rendered or not
                 float4 vertex : SV_POSITION;
-                float4 world : TEXCOORD0;
-                float3 triID : TEXCOORD2; // triID in x, render in y
+                float4 world : TEXCOORD1;
+                float4 view : TEXCOORD2;
+                float3 triID : TEXCOORD3; // triID in x, render in y
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -249,12 +251,15 @@ Shader "Hidden/LightZoneMesh"
                 o.world = CalculateQuadWorldPos(_Quads[instanceID], vertexID);;
                 o.vertex = UnityObjectToClipPos(float4(o.world.xyz, 1));
                 o.triID = float4((vertexID / 3u), o.world.w, vertexID, 0);
+                o.view = float4(mul(UNITY_MATRIX_V, o.world).xyz, 1);
                 return o;
             }
 
             fixed4 frag(v2f i, fixed facing : VFACE) : SV_Target
             {
-                return facing > 0 ? float4(float(i.triID.z) / 6.0f, 0, 0, 1) : float4(0, float(i.triID.z) / 6.0f, 0, 1);
+                //return facing > 0 ? float4(float(i.triID.z) / 6.0f, 0, 0, 1) : float4(0, float(i.triID.z) / 6.0f, 0, 1);
+                return -i.view.z;
+                //return float4(1, 1, 1, 1);
             }
 
             ENDCG
@@ -262,6 +267,9 @@ Shader "Hidden/LightZoneMesh"
 
         Pass
         {
+            Cull Off
+            Blend One One
+            ZWrite Off
             Name "CeilingMeshPass"
 
             CGPROGRAM
@@ -272,8 +280,9 @@ Shader "Hidden/LightZoneMesh"
             {
                 //w determines if should be rendered or not
                 float4 vertex : SV_POSITION;
-                float4 world : TEXCOORD0;
-                float4 view : TEXCOORD1;
+                float4 screen : TEXCOORD0;
+                float4 world : TEXCOORD1;
+                float4 view : TEXCOORD2;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
             
@@ -286,12 +295,14 @@ Shader "Hidden/LightZoneMesh"
                 o.world = CalculateCeilingWorldPos(vertexID, _edgeHeight);
                 o.vertex = UnityObjectToClipPos(float4(o.world.xyz, 1));
                 o.view = float4(mul(UNITY_MATRIX_V, o.world).xyz, 1);
+                o.screen = ComputeScreenPos(o.vertex);
                 return o;
             };
 
             fixed4 frag(v2f i, fixed facing : VFACE) : SV_Target
             {
-                float4 color = CalculateFragColor(i.world, -i.view.z, facing);
+                float2 uv = i.screen.xy / i.screen.w;
+                float4 color = CalculateFragColor(i.world, uv, -i.view.z, facing);
                 return color;
             };
             ENDCG
@@ -299,6 +310,9 @@ Shader "Hidden/LightZoneMesh"
         
         Pass
         {
+            Cull Off
+            Blend One One
+            ZWrite Off
             Name "CeilingMeshDebugPass"
 
             CGPROGRAM
@@ -310,7 +324,7 @@ Shader "Hidden/LightZoneMesh"
                 //w determines if should be rendered or not
                 float4 vertex : SV_POSITION;
                 float4 world : TEXCOORD0;
-                float3 triID : TEXCOORD2; // triID in x, render in y
+                float3 triID : TEXCOORD1; // triID in x, render in y
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
             
@@ -335,6 +349,9 @@ Shader "Hidden/LightZoneMesh"
 
         Pass
         {
+            Cull Off
+            Blend One One
+            ZWrite Off
             Name "EdgeMeshPass"
 
             CGPROGRAM
@@ -345,8 +362,9 @@ Shader "Hidden/LightZoneMesh"
             {
                 //w determines if should be rendered or not
                 float4 vertex : SV_POSITION;
-                float4 world : TEXCOORD0;
-                float4 view : TEXCOORD1;
+                float4 screen : TEXCOORD0;
+                float4 world : TEXCOORD1;
+                float4 view : TEXCOORD2;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -362,14 +380,15 @@ Shader "Hidden/LightZoneMesh"
                 v2f o;
                 o.world = CalculateEdgeWorldPos(_Edges[instanceID], vertexID, _edgeHeight);
                 o.vertex = UnityObjectToClipPos(float4(o.world.xyz, 1));
-                float3 positionVS = mul(UNITY_MATRIX_V, o.world).xyz;
-                o.view = float4(positionVS, 1);
+                o.view = float4(mul(UNITY_MATRIX_V, o.world).xyz, 1);
+                o.screen = ComputeScreenPos(o.vertex);
                 return o;
             }
 
             fixed4 frag(v2f i, fixed facing : VFACE) : SV_Target
             {
-                float4 color = CalculateFragColor(i.world, -i.view.z, facing);
+                float2 uv = i.screen.xy / i.screen.w;
+                float4 color = CalculateFragColor(i.world, uv, -i.view.z, facing);
                 return color;
             }
             ENDCG
@@ -377,6 +396,9 @@ Shader "Hidden/LightZoneMesh"
         
         Pass
         {
+            Cull Off
+            Blend One One
+            ZWrite Off
             Name "EdgeMeshDebugPass"
 
             CGPROGRAM
@@ -388,7 +410,7 @@ Shader "Hidden/LightZoneMesh"
                 //w determines if should be rendered or not
                 float4 vertex : SV_POSITION;
                 float4 world : TEXCOORD0;
-                float3 triID : TEXCOORD2; // triID in x, render in y
+                float3 triID : TEXCOORD1; // triID in x, render in y
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 

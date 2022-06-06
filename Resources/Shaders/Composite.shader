@@ -1,4 +1,4 @@
-Shader "Hidden/MixDepths"
+Shader "Hidden/Composite"
 {
     Properties
     {
@@ -8,21 +8,15 @@ Shader "Hidden/MixDepths"
     {
         // No culling or depth
         Cull Off ZWrite Off ZTest Always
-            
+
         Pass
         {
+            Name "StandardComposite"
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
 
             #include "UnityCG.cginc"
-
-            sampler2D _MainTex;
-            float4 _MainTex_ST;
-
-            //Texture2D _DownsampleTexture0;
-            sampler2D _DownsampleTexture2;
-            SamplerState my_point_clamp_sampler;
 
             struct appdata
             {
@@ -32,30 +26,35 @@ Shader "Hidden/MixDepths"
 
             struct v2f
             {
-                float4 vertex : SV_POSITION;
                 float2 uv : TEXCOORD0;
+                float4 vertex : SV_POSITION;
             };
-
 
             v2f vert (appdata v)
             {
                 v2f o;
                 o.vertex = UnityObjectToClipPos(v.vertex);
                 o.uv = v.uv;
-               return o;
+                return o;
             }
 
-            fixed4 frag(v2f i, fixed facing : VFACE) : SV_Target
+            sampler2D _MainTex;
+            sampler2D _CameraSource;
+
+            fixed4 frag (v2f i) : SV_Target
             {
-                //float2 mask = _DownsampleTexture0.Sample(my_point_clamp_sampler, i.uv).xy;
-                float2 mask = tex2D(_DownsampleTexture2, i.uv).xy;
+                /*
+                float4 v = tex2D(_MainTex, i.uv);
+                return float4(v.xy / 1000.0f, 0, 1);
+                */
 
-                float2 boxDepth = tex2D(_MainTex, i.uv).xy;
+                float4 volume = tex2D(_MainTex, i.uv);
+                float4 cam = tex2D(_CameraSource, i.uv);
 
-                mask.x -= mask.y > .1f ? boxDepth.y : 0;
-                //return col;
-                //return float4(0, 0, 0, 0);
-                return float4(mask.x, 0, 0, 0);
+                float3 combine = cam.xyz * volume.w;
+                combine += volume.xyz;
+
+                return float4(combine, 1);
             }
             ENDCG
         }

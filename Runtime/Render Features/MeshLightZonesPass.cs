@@ -11,16 +11,16 @@ class MeshLightZonesPass : ScriptableRenderPass
 
     Material _shadowSampleMaterial;
     Material _boxDepthMaterial;
-    Material _lightVolumeMeshMaterial;
+    Material _lightZoneMeshMaterial;
     Material _mixDepthMaterial;
     Material _atmosphereMaterial;
-    Material _downsamplePointMaterial;
+    Material _smartSampleMaterial;
     Material _compositeMaterial;
     ComputeShader _laplacianCompute;
     ComputeShader _downsampleBufferCompute;
     ComputeShader _lightVolumeCompute;
+    ComputeShader _patchTextureCompute;
     ComputeShader _blurCompute;
-    ComputeShader _upsampleCompute;
     Mesh _cubeMesh;
     RenderTargetIdentifier _cameraColorTarget;
     RenderTargetIdentifier _cameraDepthTarget;
@@ -47,6 +47,7 @@ class MeshLightZonesPass : ScriptableRenderPass
     int _maxTesselation;
     float _distanceFactor;
     int _downsampleAmount;
+    float _patchThreshold;
     float _blurGaussianStandardDeviation;
     int _blurKernelRadius;
     float _blurDepthFalloff;
@@ -76,6 +77,9 @@ class MeshLightZonesPass : ScriptableRenderPass
     
     int _downsampleTemp2Id;
     RenderTargetIdentifier _downsampleTemp2;
+    
+    int _depthDownsampleId;
+    RenderTargetIdentifier _depthDownsample;
 
     int _localShadowTargetId;
     RenderTargetIdentifier _localShadowTarget;
@@ -106,9 +110,6 @@ class MeshLightZonesPass : ScriptableRenderPass
     public ComputeBuffer _tesselationDepthData;
     tesselationDepthData[] _depthDataArray;
 
-    //Vector3 _lightCameraPos;
-    //Vector3 _lightCameraChunk;
-    //int _baseTesselationMapWidth;
     int _baseTesselationMapSize;
     Vector3 _posInLight;
     float _minCascadeDepth;
@@ -120,7 +121,6 @@ class MeshLightZonesPass : ScriptableRenderPass
     int _totalLaplacianSize;
     Bounds? _lightZoneBounds;
 
-    MaterialPropertyBlock _boxBlock;
     MaterialPropertyBlock _meshBlock;
 
     struct tesselationDepthData
@@ -136,32 +136,32 @@ class MeshLightZonesPass : ScriptableRenderPass
     public MeshLightZonesPass(
         Material shadowSampleMaterial,
         Material boxDepthMaterial,
-        Material lightVolumeMaterial,
+        Material lightZoneMaterial,
         Material mixDepthMaterial,
         Material atmosphereMaterial,
-        Material downsamplePointMaterial,
+        Material smartSampleMaterial,
         Material compositeMaterial,
         ComputeShader laplacianCompute,
         ComputeShader downsampleBufferCompute,
         ComputeShader lightVolumeCompute,
+        ComputeShader patchTextureCompute,
         ComputeShader blurCompute,
-        ComputeShader upsampleCompute,
         Mesh cubeMesh,
         string profilerTag
         )
     {
         _shadowSampleMaterial = shadowSampleMaterial;
         _boxDepthMaterial = boxDepthMaterial;
-        _lightVolumeMeshMaterial = lightVolumeMaterial;
+        _lightZoneMeshMaterial = lightZoneMaterial;
         _mixDepthMaterial = mixDepthMaterial;
         _atmosphereMaterial = atmosphereMaterial;
-        _downsamplePointMaterial = downsamplePointMaterial;
+        _smartSampleMaterial = smartSampleMaterial;
         _compositeMaterial = compositeMaterial;
         _laplacianCompute = laplacianCompute;
         _downsampleBufferCompute = downsampleBufferCompute;
         _lightVolumeCompute = lightVolumeCompute;
+        _patchTextureCompute = patchTextureCompute;
         _blurCompute = blurCompute;
-        _upsampleCompute = upsampleCompute;
         _cubeMesh = cubeMesh;
         _profilerTag = profilerTag;
 
@@ -176,9 +176,9 @@ class MeshLightZonesPass : ScriptableRenderPass
         _downsampleTemp0Id = Shader.PropertyToID("_DownsampleTexture0");
         _downsampleTemp1Id = Shader.PropertyToID("_DownsampleTexture1");
         _downsampleTemp2Id = Shader.PropertyToID("_DownsampleTexture2");
+        _depthDownsampleId = Shader.PropertyToID("_CameraDepthTextureDownsampled");
         _localShadowTargetId = Shader.PropertyToID("_LocalShadowTexture");
 
-        _boxBlock = new MaterialPropertyBlock();
         _meshBlock = new MaterialPropertyBlock();
     }
 
@@ -315,6 +315,7 @@ class MeshLightZonesPass : ScriptableRenderPass
         int maxTesselation,
         float distanceFactor,
         int downsampleAmount,
+        float patchThreshold,
         float blurGaussianStandardDeviation,
         int blurKernelRadius,
         float blurDepthFalloff,
@@ -336,6 +337,7 @@ class MeshLightZonesPass : ScriptableRenderPass
         _distanceFactor = distanceFactor;
         _maxLaplacianWidth = maxLaplacianWidth;
         _downsampleAmount = downsampleAmount;
+        _patchThreshold = patchThreshold;
         _blurGaussianStandardDeviation = blurGaussianStandardDeviation;
         _blurKernelRadius = blurKernelRadius;
         _blurDepthFalloff = blurDepthFalloff;
@@ -408,6 +410,14 @@ class MeshLightZonesPass : ScriptableRenderPass
             cmd.GetTemporaryRT(_downsampleTemp2Id, downsampleDescriptor);
             _downsampleTemp2 = new RenderTargetIdentifier(_downsampleTemp2Id);
             ConfigureTarget(_downsampleTemp2);
+
+            RenderTextureDescriptor downsampleDepthDescriptor = new RenderTextureDescriptor(_downsampleTextureWidth, _downsampleTextureHeight, RenderTextureFormat.RFloat);
+            downsampleDescriptor.enableRandomWrite = true;
+            downsampleDescriptor.msaaSamples = 1;
+
+            cmd.GetTemporaryRT(_depthDownsampleId, downsampleDepthDescriptor);
+            _depthDownsample = new RenderTargetIdentifier(_depthDownsampleId);
+            ConfigureTarget(_depthDownsample);
         }
         else
         {
@@ -432,8 +442,12 @@ class MeshLightZonesPass : ScriptableRenderPass
             ConfigureTarget(_downsampleTemp1);
             
             cmd.GetTemporaryRT(_downsampleTemp2Id, dummyDescriptor);
-            _downsampleTemp1 = new RenderTargetIdentifier(_downsampleTemp2Id);
+            _downsampleTemp2 = new RenderTargetIdentifier(_downsampleTemp2Id);
             ConfigureTarget(_downsampleTemp2);
+            
+            cmd.GetTemporaryRT(_depthDownsampleId, dummyDescriptor);
+            _depthDownsample = new RenderTargetIdentifier(_depthDownsampleId);
+            ConfigureTarget(_depthDownsample);
         }
 
         // can use the green channel on this to tell laplacian texture to ignore parts if desired
@@ -606,7 +620,7 @@ class MeshLightZonesPass : ScriptableRenderPass
             uint yGroupSize;
             uint zGroupSize;
 
-            // shadow sampeling
+            // shadow sampling
             cmd.SetGlobalMatrix("_worldToLight", shadowLight.localToWorldMatrix.inverse);
             cmd.SetGlobalMatrix("_lightToWorld", shadowLight.localToWorldMatrix);
             cmd.SetGlobalMatrix("_shadowToWorld0", _mainLightShadowMatricesInverse[0]);
@@ -669,7 +683,7 @@ class MeshLightZonesPass : ScriptableRenderPass
                 Mathf.CeilToInt(_maxLaplacianWidth / (float)yGroupSize),
                 1);
 
-            // downsample
+            // downsample the laplacian
             int downsampleKernel = _downsampleBufferCompute.FindKernel("Downsample");
             int laplacianWidth = _maxLaplacianWidth / 2;
             cmd.SetComputeBufferParam(_downsampleBufferCompute, downsampleKernel, "_LaplacianMaps", _laplacianMaps);
@@ -687,34 +701,37 @@ class MeshLightZonesPass : ScriptableRenderPass
                 laplacianWidth /= 2;
             }
 
-            cmd.SetProjectionMatrix(renderingData.cameraData.camera.projectionMatrix);
+            cmd.SetProjectionMatrix(renderingData.cameraData.camera.nonJitteredProjectionMatrix);
             cmd.SetViewMatrix(renderingData.cameraData.camera.worldToCameraMatrix);
 
-            ComputeBoxDepth(cmd, renderingData, _downsampleTemp1);
+            // downsample 
+            ComputeDepthDownsample(cmd, _depthDownsample);
 
-            ComputeLightMesh(cmd, renderingData, shadowLight, boundsInLight, _downsampleTemp2);
+            ComputeBoxDepth(cmd, lightZone, _downsampleTemp0);
 
-            ComputeMixDepth(cmd, _downsampleTemp1, _downsampleTemp0);
+            ComputeLightMesh(cmd, renderingData, shadowLight, boundsInLight, _downsampleTemp0, _downsampleTemp1);
+
+            ComputeMixDepth(cmd, _downsampleTemp0, _downsampleTemp1, _downsampleTemp2);
+
+            ComputePatchTexture(cmd, _downsampleTemp2, _downsampleTemp0);
 
             // atmosphere
             ComputeAtmosphere(cmd, renderingData, shadowLight, _downsampleTemp0, _downsampleTemp1);
 
             // blur
-            ComputeBlur(cmd, _downsampleTemp2, _downsampleTemp0, _downsampleTemp1);
+            ComputeBlur(cmd, _downsampleTemp0, _downsampleTemp1);
 
             // upsample
-            ComputeUpsample(cmd, _downsampleTemp2, _downsampleTemp1, _temp0);
+            ComputeUpsample(cmd, _downsampleTemp1, _temp0);
 
             // blit to screen
             int compositePass = _compositeMaterial.FindPass("StandardComposite");
-            int debugCompositePass = _compositeMaterial.FindPass("DebugComposite");
+            //int debugCompositePass = _compositeMaterial.FindPass("DebugComposite");
             // we apply our material while blitting to a temporary texture
             cmd.Blit(_cameraColorTarget, _temp1);
             cmd.SetGlobalTexture("_CameraSource", _temp1);
             cmd.Blit(_temp0, _cameraColorTarget, _compositeMaterial, compositePass);
-            //cmd.Blit(_downsampleTemp2, _cameraColorTarget, _compositeMaterial, compositePass);
-            //cmd.Blit(_downsampleTemp0, _cameraColorTarget, _compositeMaterial, 0);
-            // ...then blit it back again 
+            //cmd.Blit(_temp0, _cameraColorTarget, _compositeMaterial, compositePass);
         }
 
 
@@ -726,18 +743,26 @@ class MeshLightZonesPass : ScriptableRenderPass
         //context.Submit();
     }
 
-    private void ComputeBoxDepth(CommandBuffer cmd, RenderingData renderingData, RenderTargetIdentifier endTexture)
+    private void ComputeDepthDownsample(CommandBuffer cmd, RenderTargetIdentifier endTexture)
+    {
+        int downsamplePass = _smartSampleMaterial.FindPass("DownsamplePoint");
+        // downsamples the camera depth
+        cmd.Blit(_cameraDepthTarget, endTexture, _smartSampleMaterial, downsamplePass);
+    }
+
+    private void ComputeBoxDepth(CommandBuffer cmd, LightZone lightZone, RenderTargetIdentifier endTexture)
     {
         cmd.SetRenderTarget(endTexture);
         cmd.ClearRenderTarget(true, true, Color.clear, 1f);
 
-        _boxBlock.SetMatrix("_cameraMatrix", renderingData.cameraData.camera.nonJitteredProjectionMatrix * renderingData.cameraData.camera.transform.worldToLocalMatrix);
-
-        cmd.DrawMesh(_cubeMesh, Matrix4x4.TRS(_lightZoneBounds.Value.center, Quaternion.identity, _lightZoneBounds.Value.size), _boxDepthMaterial, 0, 0, _boxBlock);
+        //cmd.DrawMesh(_cubeMesh, Matrix4x4.TRS(_lightZoneBounds.Value.center, Quaternion.identity, _lightZoneBounds.Value.size), _boxDepthMaterial, 0, 0);
+        cmd.DrawMesh(_cubeMesh, Matrix4x4.TRS(lightZone.transform.position + lightZone.offset, lightZone.transform.rotation, lightZone.transform.localScale + lightZone.scale), _boxDepthMaterial, 0, 0);
     }
 
-    private void ComputeLightMesh(CommandBuffer cmd, RenderingData renderingData, VisibleLight shadowLight, Bounds boundsInLight, RenderTargetIdentifier endTexture)
+    private void ComputeLightMesh(CommandBuffer cmd, RenderingData renderingData, VisibleLight shadowLight, Bounds boundsInLight, RenderTargetIdentifier boxDepthTexture, RenderTargetIdentifier endTexture)
     {
+        cmd.SetGlobalTexture("_BoxDepthTexture", boxDepthTexture);
+
         int initializeTesselationKernel = _lightVolumeCompute.FindKernel("InitializeTesselationMap");
         int initializeLayerKernel = _lightVolumeCompute.FindKernel("InitializeFirstLayer");
         int initializeQuadsKernel = _lightVolumeCompute.FindKernel("InitializeQuadBuffers");
@@ -749,9 +774,9 @@ class MeshLightZonesPass : ScriptableRenderPass
         int copyToArgsKernel = _lightVolumeCompute.FindKernel("CopyToArgs");
         int swapKernel = _lightVolumeCompute.FindKernel("SwapReadWrite");
         int prepareNextKernel = _lightVolumeCompute.FindKernel("PrepareNextLoop");
-        int projectionPass = _lightVolumeMeshMaterial.FindPass("ProjectionMeshPass");
-        int edgePass = _lightVolumeMeshMaterial.FindPass("EdgeMeshPass");
-        int ceilingPass = _lightVolumeMeshMaterial.FindPass("CeilingMeshPass");
+        int projectionPass = _lightZoneMeshMaterial.FindPass("ProjectionMeshPass");
+        int edgePass = _lightZoneMeshMaterial.FindPass("EdgeMeshPass");
+        int ceilingPass = _lightZoneMeshMaterial.FindPass("CeilingMeshPass");
 
         uint xGroupSize;
         uint yGroupSize;
@@ -897,7 +922,6 @@ class MeshLightZonesPass : ScriptableRenderPass
 
         _meshBlock.SetBuffer("_Quads", _emitQuadsBuffer);
         _meshBlock.SetBuffer("_Edges", _emitEdgesBuffer);
-        _meshBlock.SetMatrix("_cameraMatrix", renderingData.cameraData.camera.nonJitteredProjectionMatrix * renderingData.cameraData.camera.transform.worldToLocalMatrix);
         _meshBlock.SetMatrix("_lightToWorld", shadowLight.localToWorldMatrix);
         _meshBlock.SetInteger("_maxTesselation", _maxTesselation);
         _meshBlock.SetInteger("_baseTesselationWidth", _chunksInWidth);
@@ -905,12 +929,10 @@ class MeshLightZonesPass : ScriptableRenderPass
         _meshBlock.SetVector("_centerPos", _posInLight);
         _meshBlock.SetFloat("_edgeHeight", boundsInLight.extents.z);
 
-        cmd.SetRenderTarget(_downsampleTemp2);
+        cmd.SetRenderTarget(endTexture);
         cmd.ClearRenderTarget(true, true, Color.clear, 1f);
-
         // draw ceiling
-        cmd.DrawProcedural(Matrix4x4.identity, _lightVolumeMeshMaterial, ceilingPass, MeshTopology.Triangles, 6, 0, _meshBlock);
-        // switch to dispatching compute shaders indirectly to limit number of unnecessary draw calls.
+        cmd.DrawProcedural(Matrix4x4.identity, _lightZoneMeshMaterial, ceilingPass, MeshTopology.Triangles, 6, 0, _meshBlock);
         for (int i = 0; i < _maxTesselation; i++)
         {
             //cmd.SetComputeTextureParam(_lightVolumeCompute, levelKernel, "_OutputTex", _outTarget[i]);
@@ -926,19 +948,40 @@ class MeshLightZonesPass : ScriptableRenderPass
 
             cmd.DispatchCompute(_lightVolumeCompute, prepareNextKernel, 1, 1, 1);
 
-            cmd.DrawProceduralIndirect(Matrix4x4.identity, _lightVolumeMeshMaterial, projectionPass, MeshTopology.Triangles, _quadArgsBuffer, 0, _meshBlock);
+            cmd.DrawProceduralIndirect(Matrix4x4.identity, _lightZoneMeshMaterial, projectionPass, MeshTopology.Triangles, _quadArgsBuffer, 0, _meshBlock);
 
-            cmd.DrawProceduralIndirect(Matrix4x4.identity, _lightVolumeMeshMaterial, edgePass, MeshTopology.Triangles, _edgeArgsBuffer, 0, _meshBlock);
+            cmd.DrawProceduralIndirect(Matrix4x4.identity, _lightZoneMeshMaterial, edgePass, MeshTopology.Triangles, _edgeArgsBuffer, 0, _meshBlock);
         }
     }
 
-    private void ComputeMixDepth(CommandBuffer cmd, RenderTargetIdentifier startTexture, RenderTargetIdentifier endTexture)
+    private void ComputeMixDepth(CommandBuffer cmd, RenderTargetIdentifier boxDepthTexture, RenderTargetIdentifier meshDepthTexture, RenderTargetIdentifier endTexture)
     {
-        // set downsampletemp2 manually?
-        cmd.Blit(startTexture, endTexture, _mixDepthMaterial, 0);
+        cmd.SetGlobalTexture("_BoxDepthTexture", boxDepthTexture);
+        cmd.Blit(meshDepthTexture, endTexture, _mixDepthMaterial, 0);
+    }
+    
+    private void ComputePatchTexture(CommandBuffer cmd, RenderTargetIdentifier textureToPatch, RenderTargetIdentifier endTexture)
+    {
+        int patchKernel = _patchTextureCompute.FindKernel("Patch");
+
+        uint xGroupSize;
+        uint yGroupSize;
+        uint zGroupSize;
+
+        _patchTextureCompute.GetKernelThreadGroupSizes(patchKernel, out xGroupSize, out yGroupSize, out zGroupSize);
+
+        cmd.SetComputeIntParams(_patchTextureCompute, "_textureSize", new int[] { _downsampleTextureWidth, _downsampleTextureHeight });
+        cmd.SetComputeFloatParam(_patchTextureCompute, "_patchThreshold", _patchThreshold);
+        cmd.SetComputeTextureParam(_patchTextureCompute, patchKernel, "_BaseTexture", textureToPatch);
+        cmd.SetComputeTextureParam(_patchTextureCompute, patchKernel, "_PatchedTexture", endTexture);
+
+        cmd.DispatchCompute(_patchTextureCompute, patchKernel,
+            Mathf.CeilToInt(_downsampleTextureWidth / (float)xGroupSize),
+            Mathf.CeilToInt(_downsampleTextureHeight / (float)yGroupSize),
+            1);
     }
 
-    private void ComputeAtmosphere(CommandBuffer cmd, RenderingData renderingData, VisibleLight shadowLight, RenderTargetIdentifier startTexture, RenderTargetIdentifier endTexture)
+    private void ComputeAtmosphere(CommandBuffer cmd, RenderingData renderingData, VisibleLight shadowLight, RenderTargetIdentifier mixedDepthTexture, RenderTargetIdentifier endTexture)
     {
         cmd.SetGlobalMatrix("_cameraInverseProjection", renderingData.cameraData.camera.projectionMatrix.inverse);
         cmd.SetGlobalMatrix("_cameraToWorld", renderingData.cameraData.camera.cameraToWorldMatrix);
@@ -952,16 +995,11 @@ class MeshLightZonesPass : ScriptableRenderPass
         cmd.SetGlobalFloat("_meiSactteringCoef", _mieScatteringCoef);
         cmd.SetGlobalFloat("_rayleighSactteringCoef", _rayleighSactteringCoef);
 
-        cmd.Blit(startTexture, endTexture, _atmosphereMaterial, 0);
+        cmd.Blit(mixedDepthTexture, endTexture, _atmosphereMaterial, 0);
     }
 
-    private void ComputeBlur(CommandBuffer cmd, RenderTargetIdentifier depthDownsampleTexture, RenderTargetIdentifier tempTexture, RenderTargetIdentifier textureToBlur)
+    private void ComputeBlur(CommandBuffer cmd, RenderTargetIdentifier tempTexture, RenderTargetIdentifier textureToBlurOutput)
     {
-        int downsamplePass = _downsamplePointMaterial.FindPass("DownsamplePoint");
-        // downsamples the camera depth
-        cmd.Blit(_cameraDepthTarget, depthDownsampleTexture, _downsamplePointMaterial, downsamplePass);
-        //cmd.Blit(_cameraDepthTarget, depthDownsampleTexture);
-
         // should cache kernel instead of calculating it every frame;
         int blurKernelKernel = _blurCompute.FindKernel("BlurKernel");
         int blurKernel = _blurCompute.FindKernel("ComputeBlur");
@@ -975,7 +1013,7 @@ class MeshLightZonesPass : ScriptableRenderPass
         cmd.SetComputeIntParam(_blurCompute, "_kernelRadius", _blurKernelRadius);
         cmd.SetComputeFloatParam(_blurCompute, "_stDev", _blurGaussianStandardDeviation);
         cmd.SetComputeIntParams(_blurCompute, "_textureSize", new int[] { _downsampleTextureWidth, _downsampleTextureHeight });
-        cmd.SetComputeIntParam(_blurCompute, "_downsampleRatio", _downsampleAmount);
+        //cmd.SetComputeIntParam(_blurCompute, "_downsampleRatio", _downsampleAmount);
         cmd.SetComputeFloatParam(_blurCompute, "_blurDepthFalloff", _blurDepthFalloff);
 
         cmd.SetComputeBufferParam(_blurCompute, blurKernelKernel, "_Kernel", _blurKernel);
@@ -983,9 +1021,8 @@ class MeshLightZonesPass : ScriptableRenderPass
         cmd.DispatchCompute(_blurCompute, blurKernelKernel, Mathf.CeilToInt(_blurKernelRadius / (float)xGroupSize), 1, 1);
 
         cmd.SetComputeBufferParam(_blurCompute, blurKernel, "_Kernel", _blurKernel);
-        cmd.SetComputeTextureParam(_blurCompute, blurKernel, "_CameraDepthTextureDownsample", depthDownsampleTexture);
-        //cmd.SetComputeTextureParam(_blurCompute, blurKernel, "_CameraDepthTexture", _cameraDepthTarget);
-        cmd.SetComputeTextureParam(_blurCompute, blurKernel, "_BaseTexture", textureToBlur);
+        cmd.SetComputeTextureParam(_blurCompute, blurKernel, "_CameraDepthTextureDownsampled", _depthDownsample);
+        cmd.SetComputeTextureParam(_blurCompute, blurKernel, "_BaseTexture", textureToBlurOutput);
         cmd.SetComputeTextureParam(_blurCompute, blurKernel, "_BlurTexture", tempTexture);
         cmd.SetComputeIntParams(_blurCompute, "_direction", new int[] { 1, 0 });
 
@@ -997,7 +1034,7 @@ class MeshLightZonesPass : ScriptableRenderPass
             1);
 
         cmd.SetComputeTextureParam(_blurCompute, blurKernel, "_BaseTexture", tempTexture);
-        cmd.SetComputeTextureParam(_blurCompute, blurKernel, "_BlurTexture", textureToBlur);
+        cmd.SetComputeTextureParam(_blurCompute, blurKernel, "_BlurTexture", textureToBlurOutput);
         cmd.SetComputeIntParams(_blurCompute, "_direction", new int[] { 0, 1 });
         // blurs in the other axis
         cmd.DispatchCompute(_blurCompute, blurKernel,
@@ -1006,44 +1043,23 @@ class MeshLightZonesPass : ScriptableRenderPass
             1);
     }
 
-    private void ComputeUpsample(CommandBuffer cmd, RenderTargetIdentifier cameraDepthDownsample, RenderTargetIdentifier startTexture, RenderTargetIdentifier endTexture)
+    private void ComputeUpsample(CommandBuffer cmd, RenderTargetIdentifier textureToUpsample, RenderTargetIdentifier endTexture)
     {
-        int upsamplePass = _downsamplePointMaterial.FindPass("Upsample");
+        int upsamplePass = _smartSampleMaterial.FindPass("Upsample");
 
-        cmd.SetGlobalTexture("_CameraDepthTextureDownsampled", cameraDepthDownsample);
-        cmd.Blit(startTexture, endTexture, _downsamplePointMaterial, upsamplePass);
-        /*
-        int upsampleKernel = _upsampleCompute.FindKernel("Upsample");
-
-        uint xGroupSize;
-        uint yGroupSize;
-        uint zGroupSize;
-
-        cmd.SetComputeIntParam(_upsampleCompute, "_upsampleRatio", _downsampleAmount);
-        cmd.SetComputeIntParams(_upsampleCompute, "_textureSize", new int[] { _cameraTextureWidth, _cameraTextureHeight });
-
-        cmd.SetComputeTextureParam(_upsampleCompute, upsampleKernel, "_BaseTexture", startTexture);
-        cmd.SetComputeTextureParam(_upsampleCompute, upsampleKernel, "_CameraDepthTexture", _cameraDepthTarget);
-        cmd.SetComputeTextureParam(_upsampleCompute, upsampleKernel, "_CameraDepthTextureDownsampled", cameraDepthDownsample);
-        cmd.SetComputeTextureParam(_upsampleCompute, upsampleKernel, "_OutputTexture", endTexture);
-
-        _upsampleCompute.GetKernelThreadGroupSizes(upsampleKernel, out xGroupSize, out yGroupSize, out zGroupSize);
-        cmd.DispatchCompute(_upsampleCompute, upsampleKernel,
-            Mathf.CeilToInt(_cameraTextureWidth / (float)xGroupSize),
-            Mathf.CeilToInt(_cameraTextureHeight / (float)xGroupSize),
-            1);
-        */
+        cmd.Blit(textureToUpsample, endTexture, _smartSampleMaterial, upsamplePass);
     }
 
     // called after Execute, use it to clean up anything allocated in Configure
     public override void OnCameraCleanup(CommandBuffer cmd)
     {
-        cmd.ReleaseTemporaryRT(_localShadowTargetId);
         cmd.ReleaseTemporaryRT(_temp0Id);
         cmd.ReleaseTemporaryRT(_temp1Id);
         cmd.ReleaseTemporaryRT(_downsampleTemp0Id);
         cmd.ReleaseTemporaryRT(_downsampleTemp1Id);
         cmd.ReleaseTemporaryRT(_downsampleTemp2Id);
+        cmd.ReleaseTemporaryRT(_depthDownsampleId);
+        cmd.ReleaseTemporaryRT(_localShadowTargetId);
 
         /*
         for (int i = 0; i < _outTargetID.Length; i++)

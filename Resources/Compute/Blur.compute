@@ -15,14 +15,13 @@ RWBuffer<float> _Kernel;
 const int _kernelRadius;
 const float _stDev;
 
-Texture2D<float> _CameraDepthTextureDownsample;
-//Texture2D<float> _CameraDepthTexture;
+Texture2D<float> _CameraDepthTextureDownsampled;
 Texture2D<float4> _BaseTexture;
 RWTexture2D<float4> _BlurTexture;
 
 const int2 _textureSize;
 const int2 _direction;
-const int _downsampleRatio;
+//const int _downsampleRatio;
 const float _blurDepthFalloff;
 
 [numthreads(numThreads, 1, 1)]
@@ -51,17 +50,13 @@ void ComputeBlur(int2 id : SV_DispatchThreadID)
     float4 accumResult = 0.0f;
     float4 accumWeight = 0.0f;
     
-    //float depthCenter = LinearEyeDepth(_CameraDepthTexture[id.xy * _downsampleRatio]);
-    //float depthCenter = _CameraDepthTexture[id.xy * _downsampleRatio];
-    float depthCenter = _CameraDepthTextureDownsample[id.xy];
+    float depthCenter = LinearEyeDepth(_CameraDepthTextureDownsampled[id.xy]);
     
     for (int x = -_kernelRadius + 1; x < _kernelRadius; x++)
     {
         int2 dir = uint2(_direction.x * x, _direction.y * x);
         uint2 samplePix = clamp(dir + id.xy, int2(0, 0), int2(_textureSize.xy) - int2(1, 1));
-        //float depthSample = LinearEyeDepth(_CameraDepthTexture[samplePix * _downsampleRatio]);
-        //float depthSample = _CameraDepthTexture[samplePix * _downsampleRatio];
-        float depthSample = _CameraDepthTextureDownsample[samplePix];
+        float depthSample = LinearEyeDepth(_CameraDepthTextureDownsampled[samplePix]);
         float depthDiff = abs(depthSample - depthCenter);
         float r2 = depthDiff * _blurDepthFalloff;
         float g = exp(-r2 * r2);

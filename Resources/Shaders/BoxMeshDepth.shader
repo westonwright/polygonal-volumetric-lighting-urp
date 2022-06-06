@@ -23,8 +23,6 @@ Shader "Hidden/BoxMeshDepth"
 
             #include "UnityCG.cginc"
 
-            const float4x4 _cameraMatrix;
-
             sampler2D _MainTex;
             float4 _MainTex_ST;
 
@@ -46,7 +44,7 @@ Shader "Hidden/BoxMeshDepth"
                 float3 positionWS = mul(UNITY_MATRIX_M, float4(v.vertex.xyz, 1.0)).xyz;
                 float3 positionVS = mul(UNITY_MATRIX_V, float4(positionWS, 1.0)).xyz;
                 o.positionVS = float4(positionVS, 1);
-               return o;
+                return o;
             }
 
             fixed4 frag (v2f i, fixed facing : VFACE) : SV_Target

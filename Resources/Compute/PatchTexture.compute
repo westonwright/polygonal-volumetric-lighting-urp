@@ -1,0 +1,46 @@
+//#pragma kernel InitializeLaplacian
+// With help from https://valeriomarty.medium.com/raymarched-volumetric-lighting-in-unity-urp-e7bc84d31604
+#pragma kernel Patch
+#include "UnityCG.cginc"
+
+static const int sqrtThreads = 32;
+
+Texture2D<float4> _BaseTexture;
+RWTexture2D<float4> _PatchedTexture;
+
+const int2 _textureSize;
+const float _patchThreshold;
+
+[numthreads(sqrtThreads, sqrtThreads, 1)]
+void Patch(int2 id : SV_DispatchThreadID)
+{
+    if (id.x >= _textureSize.x || id.y >= _textureSize.y)
+    {
+        return;
+    }
+    
+    float4 totalVal = _BaseTexture[id.xy];
+    float centerVal = totalVal.x;
+    float neighbors[4] = 
+    {
+        _BaseTexture[int2(id.x + 1, id.y)].x,
+        _BaseTexture[int2(id.x - 1, id.y)].x,
+        _BaseTexture[int2(id.x, id.y + 1)].x,
+        _BaseTexture[int2(id.x, id.y - 1)].x
+    };
+    
+    float nearestVal = neighbors[0];
+    float nearestDist = distance(nearestVal, centerVal);
+
+    for (int i = 1; i < 4; i++)
+    {
+        float newDist = distance(neighbors[i], centerVal);
+        if (newDist < nearestDist)
+        {
+            nearestDist = newDist;
+            nearestVal = neighbors[i];
+        }
+    }
+    
+    _PatchedTexture[id.xy] = float4((nearestDist >= _patchThreshold ? nearestVal : centerVal), totalVal.yzw);
+}
