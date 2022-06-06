@@ -120,7 +120,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     }
     [SerializeField]
     //[Range(.01f, 2f)]
-    float _distanceFactor = 128f;
+    float _distanceFactor = 1024f;
     
     public int downsampleAmount
     {
@@ -173,7 +173,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     }
     [SerializeField]
     [Range(0, .1f)]
-    float _extinctionCoefficient = .01f;
+    float _extinctionCoefficient = 0f;
     
     public float meiSactteringCoefficient
     {
@@ -181,8 +181,8 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
         set { _meiSactteringCoefficient = value; }
     }
     [SerializeField]
-    [Range(-1, 1)]
-    float _meiSactteringCoefficient = 1f;
+    [Range(-.99f, .99f)]
+    float _meiSactteringCoefficient = .5f;
     
 
     public float rayleighSactteringCoefficient
