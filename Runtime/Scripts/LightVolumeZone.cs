@@ -5,23 +5,38 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using System.Reflection;
 using System.Linq;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [ExecuteAlways]
-public class LightZone : MonoBehaviour
+public class LightVolumeZone : MonoBehaviour
 {
-    [SerializeField]
-    private Vector3 Offset = Vector3.zero;
-    public Vector3 offset { get { return Offset; } }
-    [SerializeField]
-    private Vector3 Scale = Vector3.one;
-    public Vector3 scale { get { return Scale; } }
+
+#if UNITY_EDITOR
+    [MenuItem("GameObject/Light/Light Volume Zone")]
+    static void CreateZone(MenuCommand menuCommand)
+    {
+        GameObject g = new GameObject("Light Volume Zone", typeof(LightVolumeZone));
+        GameObjectUtility.SetParentAndAlign(g, menuCommand.context as GameObject);
+        Undo.RegisterCreatedObjectUndo(g, "Create " + g.name);
+        Selection.activeObject = g;
+    }
+#endif
 
     //if gizmos should be drawn
     [SerializeField]
     [Tooltip("If Gizmos should be drawn for this source")]
     private bool preview = true;
+    [SerializeField]
+    private Color previewColor = Color.red;
 
-    private Color GizmoColor = Color.red;
+    [SerializeField]
+    private Vector3 Offset = Vector3.zero;
+    public Vector3 offset { get { return Offset; } }
+    [SerializeField]
+    private Vector3 Size = Vector3.one;
+    public Vector3 size { get { return Size; } }
 
     private Bounds? zoneBounds = null;
     private Bounds? trueBounds = null;
@@ -43,7 +58,7 @@ public class LightZone : MonoBehaviour
             }
             //BoxCollider col = GetComponent<BoxCollider>();
             Gizmos.matrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.localScale);
-            Gizmos.color = GizmoColor;
+            Gizmos.color = previewColor;
             //Gizmos.DrawWireCube(HelperFunctions.MultiplyVectors(transform.localScale, col.center), HelperFunctions.MultiplyVectors(transform.localScale, col.size));
             Gizmos.DrawWireCube(zoneBounds.Value.center, zoneBounds.Value.size);
         }
@@ -81,7 +96,7 @@ public class LightZone : MonoBehaviour
 
     public void Initialize()
     {
-        if(transform.GetComponents<LightZone>().Length > 1)
+        if(transform.GetComponents<LightVolumeZone>().Length > 1)
         {
             this.hideFlags = HideFlags.HideAndDontSave | HideFlags.HideInInspector;
             Debug.LogError("Object alreay has a \"LightZone\" Component");
@@ -94,8 +109,8 @@ public class LightZone : MonoBehaviour
 
     public void UpdateBounds()
     {
-        Vector3 halfScale = Scale / 2.0f;
-        zoneBounds = new Bounds(Offset, Scale);
+        Vector3 halfScale = Size / 2.0f;
+        zoneBounds = new Bounds(Offset, Size);
         Vector3 min = Vector3.positiveInfinity;
         Vector3 max = Vector3.negativeInfinity;
         Vector3[] points = new Vector3[]

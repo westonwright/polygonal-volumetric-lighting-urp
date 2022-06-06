@@ -59,7 +59,7 @@ class MeshLightZonesPass : ScriptableRenderPass
     Color _fogColor;
     Color _ambientColor;
     Color _extinctionColor;
-    LightZone[] _lightZones;
+    LightVolumeZone[] _lightZones;
 
     bool _initializeBuffers;
 
@@ -327,7 +327,7 @@ class MeshLightZonesPass : ScriptableRenderPass
         Color fogColor,
         Color ambientColor,
         Color extinctionColor,
-        LightZone[] lightZones
+        LightVolumeZone[] lightZones
         )
     {
         _laplacianGaussianStandardDeviation = laplacianGaussianStandardDeviation;
@@ -581,7 +581,7 @@ class MeshLightZonesPass : ScriptableRenderPass
         CommandBuffer cmd = CommandBufferPool.Get(_profilerTag);
         cmd.Clear();
 
-        foreach (LightZone lightZone in _lightZones)
+        foreach (LightVolumeZone lightZone in _lightZones)
         {
             _lightZoneBounds = lightZone.GetBounds();
             if(_lightZoneBounds == null)
@@ -750,13 +750,13 @@ class MeshLightZonesPass : ScriptableRenderPass
         cmd.Blit(_cameraDepthTarget, endTexture, _smartSampleMaterial, downsamplePass);
     }
 
-    private void ComputeBoxDepth(CommandBuffer cmd, LightZone lightZone, RenderTargetIdentifier endTexture)
+    private void ComputeBoxDepth(CommandBuffer cmd, LightVolumeZone lightZone, RenderTargetIdentifier endTexture)
     {
         cmd.SetRenderTarget(endTexture);
         cmd.ClearRenderTarget(true, true, Color.clear, 1f);
 
         //cmd.DrawMesh(_cubeMesh, Matrix4x4.TRS(_lightZoneBounds.Value.center, Quaternion.identity, _lightZoneBounds.Value.size), _boxDepthMaterial, 0, 0);
-        cmd.DrawMesh(_cubeMesh, Matrix4x4.TRS(lightZone.transform.position + lightZone.offset, lightZone.transform.rotation, lightZone.transform.localScale + lightZone.scale), _boxDepthMaterial, 0, 0);
+        cmd.DrawMesh(_cubeMesh, Matrix4x4.TRS(lightZone.transform.position + lightZone.offset, lightZone.transform.rotation, lightZone.transform.localScale + lightZone.size), _boxDepthMaterial, 0, 0);
     }
 
     private void ComputeLightMesh(CommandBuffer cmd, RenderingData renderingData, VisibleLight shadowLight, Bounds boundsInLight, RenderTargetIdentifier boxDepthTexture, RenderTargetIdentifier endTexture)

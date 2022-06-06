@@ -48,6 +48,9 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     [SerializeField]
     RenderPassEvent _renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
 
+    [SerializeField]
+    private bool renderInSceneView = false;
+
     public float laplacianGaussianStandardDeviation
     {
         get { return _laplacianGaussianStandardDeviation; }
@@ -232,7 +235,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     [SerializeField]
     Color _extinctionColor = Color.black;
 
-    public void AddLightZone(LightZone lightZone)
+    public void AddLightZone(LightVolumeZone lightZone)
     {
         if (!lightZones.Contains(lightZone))
         {
@@ -240,7 +243,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
         }
     }
 
-    public void RemoveLightZone(LightZone lightZone)
+    public void RemoveLightZone(LightVolumeZone lightZone)
     {
         if (lightZones.Contains(lightZone))
         {
@@ -276,7 +279,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
 
     Mesh _cubeMesh = null;
 
-    List<LightZone> lightZones = new List<LightZone>();
+    List<LightVolumeZone> lightZones = new List<LightVolumeZone>();
 
     MeshLightZonesPass _renderPass = null;
 
@@ -289,8 +292,6 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
 
     private bool Initialize()
     {
-        //_dataPath = GetDataPath();
-
         if (!LoadShader(ref _shadowSampleShader, _shadersPath, _shadowSampleShaderName)) return false;
         if (!LoadShader(ref _boxDepthShader, _shadersPath, _boxDepthShaderName)) return false;
         if (!LoadShader(ref _lightZoneMeshShader, _shadersPath, _lightZoneMeshShaderName)) return false;
@@ -306,32 +307,10 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
         if (!LoadBuiltinMesh(ref _cubeMesh, _cubeName)) return false;
         return true;
     }
-    /*
-    private string GetDataPath()
-    {
-        // detect if in packages or assets folder
-        string dataPath = "Packages/";
-#if UNITY_EDITOR
-        var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-        var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(assembly);
-        if (packageInfo != null)
-        {
-            dataPath = "Packages/";
-            //Debug.Log("In package " + packageInfo.name);
-        }
-        else
-        {
-            dataPath = "Assets/";
-            //Debug.Log("Not in package");
-        }
-#endif  
-        return dataPath;
-    }
-    */
 
     private bool LoadShader(ref Shader shaderRefrence, string filePath, string fileName)
     {
-        //Debug.Log(_dataPath + _packageName + filePath + fileName);
+        //Debug.Log(_packageName + filePath + fileName);
         shaderRefrence = Resources.Load<Shader>(filePath + fileName);
         //shaderRefrence = (Shader)AssetDatabase.LoadAssetAtPath(_dataPath + _packageName + filePath + fileName, typeof(Shader));
         if (shaderRefrence == null)
@@ -344,7 +323,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     }
     private bool LoadCompute(ref ComputeShader computeRefrence, string filePath, string fileName)
     {
-        //Debug.Log(_dataPath + _packageName + filePath + fileName);
+        //Debug.Log(_packageName + filePath + fileName);
         computeRefrence = Resources.Load<ComputeShader>(filePath + fileName);
         //computeRefrence = (ComputeShader)AssetDatabase.LoadAssetAtPath(_dataPath + _packageName + filePath + fileName, typeof(ComputeShader));
         if (computeRefrence == null)
@@ -432,7 +411,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     {
         if (_renderPass != null)
         {
-            if (renderingData.cameraData.cameraType == CameraType.Game)
+            if (renderingData.cameraData.cameraType == CameraType.Game || (renderInSceneView && renderingData.cameraData.cameraType == CameraType.SceneView))
             {
                 if (_initialized)
                 {

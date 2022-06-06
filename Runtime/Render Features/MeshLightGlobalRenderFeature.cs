@@ -42,7 +42,10 @@ public class MeshLightGlobalRenderFeature : ScriptableRendererFeature
     }
     [SerializeField]
     RenderPassEvent _renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
-
+    
+    [SerializeField]
+    private bool renderInSceneView = false;
+    
     public float laplacianGaussianStandardDeviation
     {
         get { return _laplacianGaussianStandardDeviation; }
@@ -276,8 +279,6 @@ public class MeshLightGlobalRenderFeature : ScriptableRendererFeature
 
     private bool Initialize()
     {
-        //_dataPath = GetDataPath();
-
         if (!LoadShader(ref _shadowSampleShader, _shadersPath, _shadowSampleShaderName)) return false;
         if (!LoadShader(ref _lightGlobalMeshShader, _shadersPath, _lightGlobalMeshShaderName)) return false;
         if (!LoadShader(ref _atmosphereShader, _shadersPath, _atmosphereShaderName)) return false;
@@ -290,32 +291,10 @@ public class MeshLightGlobalRenderFeature : ScriptableRendererFeature
         if (!LoadCompute(ref _blurCompute, _computePath, _blurComputeName)) return false;
         return true;
     }
-    /*
-    private string GetDataPath()
-    {
-        // detect if in packages or assets folder
-        string dataPath = "Packages/";
-#if UNITY_EDITOR
-        var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-        var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(assembly);
-        if (packageInfo != null)
-        {
-            dataPath = "Packages/";
-            //Debug.Log("In package " + packageInfo.name);
-        }
-        else
-        {
-            dataPath = "Assets/";
-            //Debug.Log("Not in package");
-        }
-#endif  
-        return dataPath;
-    }
-    */
 
     private bool LoadShader(ref Shader shaderRefrence, string filePath, string fileName)
     {
-        //Debug.Log(_dataPath + _packageName + filePath + fileName);
+        //Debug.Log(_packageName + filePath + fileName);
         shaderRefrence = Resources.Load<Shader>(filePath + fileName);
         //shaderRefrence = (Shader)AssetDatabase.LoadAssetAtPath(_dataPath + _packageName + filePath + fileName, typeof(Shader));
         if (shaderRefrence == null)
@@ -328,7 +307,7 @@ public class MeshLightGlobalRenderFeature : ScriptableRendererFeature
     }
     private bool LoadCompute(ref ComputeShader computeRefrence, string filePath, string fileName)
     {
-        //Debug.Log(_dataPath + _packageName + filePath + fileName);
+        //Debug.Log(_packageName + filePath + fileName);
         computeRefrence = Resources.Load<ComputeShader>(filePath + fileName);
         //computeRefrence = (ComputeShader)AssetDatabase.LoadAssetAtPath(_dataPath + _packageName + filePath + fileName, typeof(ComputeShader));
         if (computeRefrence == null)
@@ -395,7 +374,7 @@ public class MeshLightGlobalRenderFeature : ScriptableRendererFeature
     {
         if (_renderPass != null)
         {
-            if (renderingData.cameraData.cameraType == CameraType.Game)
+            if (renderingData.cameraData.cameraType == CameraType.Game || (renderInSceneView && renderingData.cameraData.cameraType == CameraType.SceneView))
             {
                 if (_initialized)
                 {
