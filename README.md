@@ -1,4 +1,5 @@
 # Polygonal Volumetric Lighting for Universal Render Pipeline
+![Light Volume](https://user-images.githubusercontent.com/57042424/172150199-432d5fa3-45c6-48ed-b0f3-50c1502d4dc9.gif)
 
 This package can efficiently create local and global volumetric lighting effects using meshes generated in real time. The effects are highly tunable to reach your performance goals.
 
