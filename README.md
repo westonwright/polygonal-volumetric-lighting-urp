@@ -25,9 +25,11 @@ Make sure you have [installed](https://docs.unity3d.com/Packages/com.unity.rende
 ## Follow My Stuff :)
 Nice to meet ya I'm Weston! Thanks for taking a look at my work
 
-* [twitter](https://twitter.com/WestonWright_)
+* [**twitter**](https://twitter.com/WestonWright_): twitter shenanigans!
 
-* [github](https://github.com/westonwright)
+* [**github**](https://github.com/westonwright): more packages and projects!
+
+* [**itch.io**](https://westonwright.itch.io/): games I've made!
 
 ## Contributing
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
