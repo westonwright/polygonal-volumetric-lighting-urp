@@ -37,27 +37,35 @@ Shader "Hidden/DownsamplePoint"
                 o.uv = v.uv;
                 return o;
             }
+            
+            const int downsampleAmount;
 
             texture2D _MainTex;
             SamplerState my_point_clamp_sampler;
 
+            
             fixed4 frag (v2f i) : SV_Target
             {
+                int loop = min(downsampleAmount, 4);
+
+                float4 maxVal = 0;
+                [unroll]
+                for(int x = 0; x < loop; x++)
+                {
+                    [unroll]
+                    for(int y = 0; y < loop; y++)
+                    {
+                        maxVal = max(maxVal, _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(x, y)));
+                    }
+                }
                 /*
                 float4 d1 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(0, 0));
                 float4 d2 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(1, 0));
                 float4 d3 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(0, 1));
                 float4 d4 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(1, 1));
                 */
-
-                float4 d1 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(0, 0));
-                float4 d2 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(1, 0));
-                float4 d3 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(0, 1));
-                float4 d4 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(-1, 0));
-                float4 d5 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(0, -1));
-
                 //return float4(max(max(d1, d2), max(d3, d4)));
-                return float4(max(max(max(d1, d2), max(d3, d4)), d5));
+                return maxVal;
             }
             ENDCG
         }
@@ -91,11 +99,12 @@ Shader "Hidden/DownsamplePoint"
                 return o;
             }
 
+            const float threshold;
+
             texture2D _MainTex;
             sampler2D _CameraDepthTexture;
             texture2D _CameraDepthTextureDownsampled;
             SamplerState my_linear_clamp_sampler;
-            SamplerState my_point_clamp_sampler;
 
             fixed4 frag (v2f i) : SV_Target
             {
@@ -103,56 +112,64 @@ Shader "Hidden/DownsamplePoint"
 
                 int offset = 0;
 
-                float d0 = tex2D(_CameraDepthTexture, i.uv).x;
+                float d0 = (tex2D(_CameraDepthTexture, i.uv).x);
     
-                float d1 = _CameraDepthTextureDownsampled.Sample(my_linear_clamp_sampler, i.uv, int2(0, 0)).x;
-                float d2 = _CameraDepthTextureDownsampled.Sample(my_linear_clamp_sampler, i.uv, int2(1, 0)).x;
-                float d3 = _CameraDepthTextureDownsampled.Sample(my_linear_clamp_sampler, i.uv, int2(0, 1)).x;
-                float d4 = _CameraDepthTextureDownsampled.Sample(my_linear_clamp_sampler, i.uv, int2(-1, 0)).x;
-                float d5 = _CameraDepthTextureDownsampled.Sample(my_linear_clamp_sampler, i.uv, int2(0, -1)).x;
-    
+                float d1 = (_CameraDepthTextureDownsampled.Sample(my_linear_clamp_sampler, i.uv, int2(0, 0)).x);
+                float d2 = (_CameraDepthTextureDownsampled.Sample(my_linear_clamp_sampler, i.uv, int2(1, 0)).x);
+                float d3 = (_CameraDepthTextureDownsampled.Sample(my_linear_clamp_sampler, i.uv, int2(0, 1)).x);
+                float d4 = (_CameraDepthTextureDownsampled.Sample(my_linear_clamp_sampler, i.uv, int2(-1, 0)).x);
+                float d5 = (_CameraDepthTextureDownsampled.Sample(my_linear_clamp_sampler, i.uv, int2(0, -1)).x);
                 
-                d1 = abs(d0 - d1);
-                d2 = abs(d0 - d2);
-                d3 = abs(d0 - d3);
-                d4 = abs(d0 - d4);
-                d5 = abs(d0 - d5);
-    
-                float dmin = min(min(min(d1, d2), min(d3, d4)), d5);
-    
-                if (dmin == d1)
-                    offset = 0;
-                else if (dmin == d2)
-                    offset = 1;
-                else if (dmin == d3)
-                    offset = 2;
-                else if (dmin == d4)
-                    offset = 3;
-                else if (dmin == d5)
-                    offset = 4;
-
-                switch (offset)
+                float maxDist = max(max(abs(d1 - d2), abs(d1 - d3)), max(abs(d1 - d4), abs(d1 - d5)));
+                
+                if(maxDist >= threshold)
                 {
-                    case 0:
-                        color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(0, 0));
-                        break;
-                    case 1:
-                        color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(1, 0));
-                        break;
-                    case 2:
-                        color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(0, 1));
-                        break;
-                    case 3:
-                        color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(-1, 0));
-                        break;
-                    case 4:
-                        color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(0, -1));
-                        break;
-                    default:
-                        color = _MainTex.Sample(my_linear_clamp_sampler, i.uv).x;
-                        break;
-                }
+                    d1 = abs(d0 - d1);
+                    d2 = abs(d0 - d2);
+                    d3 = abs(d0 - d3);
+                    d4 = abs(d0 - d4);
+                    d5 = abs(d0 - d5);
+    
+                    float dmin = min(min(min(d1, d2), min(d3, d4)), d5);
+    
+                    if (dmin == d1)
+                        offset = 0;
+                    else if (dmin == d2)
+                        offset = 1;
+                    else if (dmin == d3)
+                        offset = 2;
+                    else if (dmin == d4)
+                        offset = 3;
+                    else if (dmin == d5)
+                        offset = 4;
 
+                    switch (offset)
+                    {
+                        case 0:
+                            color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(0, 0));
+                            break;
+                        case 1:
+                            color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(1, 0));
+                            break;
+                        case 2:
+                            color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(0, 1));
+                            break;
+                        case 3:
+                            color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(-1, 0));
+                            break;
+                        case 4:
+                            color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(0, -1));
+                            break;
+                        default:
+                            color = _MainTex.Sample(my_linear_clamp_sampler, i.uv).x;
+                            break;
+                    }
+                }
+                else
+                {
+                    color = _MainTex.Sample(my_linear_clamp_sampler, i.uv, int2(0, 0));
+                }
+                
                 return color;
             }
             ENDCG

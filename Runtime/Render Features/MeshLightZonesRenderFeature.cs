@@ -165,7 +165,16 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
     [SerializeField]
     [Range(0, 1)]
     float _blurDepthFalloff = .01f;
-    
+
+    public float upsampleDepthThreshold
+    {
+        get { return _upsampleDepthThreshold; }
+        set { _upsampleDepthThreshold = value; }
+    }
+    [SerializeField]
+    [Range(0, 1)]
+
+    float _upsampleDepthThreshold = .01f;
     public float extinctionCoefficient
     {
         get { return _extinctionCoefficient; }
@@ -434,6 +443,7 @@ public class MeshLightZonesRenderFeature : ScriptableRendererFeature
                         blurGaussianStandardDeviation, 
                         blurKernelRadius, 
                         blurDepthFalloff, 
+                        upsampleDepthThreshold,
                         extinctionCoefficient, 
                         meiSactteringCoefficient, 
                         rayleighSactteringCoefficient, 

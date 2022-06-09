@@ -130,7 +130,6 @@ public class MeshLightGlobalRenderFeature : ScriptableRendererFeature
         set { _distanceFactor = value; }
     }
     [SerializeField]
-    //[Range(.01f, 2f)]
     float _distanceFactor = 1024f;
     
     public int downsampleAmount
@@ -175,6 +174,15 @@ public class MeshLightGlobalRenderFeature : ScriptableRendererFeature
     [SerializeField]
     [Range(0, 1)]
     float _blurDepthFalloff = .01f;
+
+    public float upsampleDepthThreshold
+    {
+        get { return _upsampleDepthThreshold; }
+        set { _upsampleDepthThreshold = value; }
+    }
+    [SerializeField]
+    [Range(0, 1)]
+    float _upsampleDepthThreshold = .01f;
 
     public float extinctionCoefficient
     {
@@ -398,7 +406,8 @@ public class MeshLightGlobalRenderFeature : ScriptableRendererFeature
                         patchThreshold,
                         blurGaussianStandardDeviation, 
                         blurKernelRadius, 
-                        blurDepthFalloff, 
+                        blurDepthFalloff,
+                        upsampleDepthThreshold,
                         extinctionCoefficient, 
                         meiSactteringCoefficient, 
                         rayleighSactteringCoefficient, 

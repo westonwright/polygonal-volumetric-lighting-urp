@@ -51,6 +51,7 @@ class MeshLightZonesPass : ScriptableRenderPass
     float _blurGaussianStandardDeviation;
     int _blurKernelRadius;
     float _blurDepthFalloff;
+    float _upsampleDepthThreshold;
     float _extinctionCoef;
     float _mieScatteringCoef;
     float _rayleighSactteringCoef;
@@ -319,6 +320,7 @@ class MeshLightZonesPass : ScriptableRenderPass
         float blurGaussianStandardDeviation,
         int blurKernelRadius,
         float blurDepthFalloff,
+        float upsampleDepthThreshold,
         float extinctionCoef,
         float mieScatteringCoef,
         float rayleighSactteringCoef,
@@ -341,6 +343,7 @@ class MeshLightZonesPass : ScriptableRenderPass
         _blurGaussianStandardDeviation = blurGaussianStandardDeviation;
         _blurKernelRadius = blurKernelRadius;
         _blurDepthFalloff = blurDepthFalloff;
+        _upsampleDepthThreshold = upsampleDepthThreshold;
         _extinctionCoef = extinctionCoef;
         _mieScatteringCoef = mieScatteringCoef;
         _rayleighSactteringCoef = rayleighSactteringCoef;
@@ -746,6 +749,7 @@ class MeshLightZonesPass : ScriptableRenderPass
     private void ComputeDepthDownsample(CommandBuffer cmd, RenderTargetIdentifier endTexture)
     {
         int downsamplePass = _smartSampleMaterial.FindPass("DownsamplePoint");
+        _smartSampleMaterial.SetInt("downsampleAmount", _downsampleAmount);
         // downsamples the camera depth
         cmd.Blit(_cameraDepthTarget, endTexture, _smartSampleMaterial, downsamplePass);
     }
@@ -1046,7 +1050,7 @@ class MeshLightZonesPass : ScriptableRenderPass
     private void ComputeUpsample(CommandBuffer cmd, RenderTargetIdentifier textureToUpsample, RenderTargetIdentifier endTexture)
     {
         int upsamplePass = _smartSampleMaterial.FindPass("Upsample");
-
+        _smartSampleMaterial.SetFloat("threshold", _upsampleDepthThreshold);
         cmd.Blit(textureToUpsample, endTexture, _smartSampleMaterial, upsamplePass);
     }
 
