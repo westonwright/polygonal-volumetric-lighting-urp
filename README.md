@@ -5,9 +5,9 @@ This package can efficiently create local and global volumetric lighting effects
 
 ## Check the [Wiki](https://github.com/westonwright/polygonal-volumetric-lighting-urp/wiki) for more info!
 * [Features](https://github.com/westonwright/polygonal-volumetric-lighting-urp/wiki/Features)
+* [Advanced Setup](https://github.com/westonwright/polygonal-volumetric-lighting-urp/wiki/Advanced-Setup)
 * [Roadmap](https://github.com/westonwright/polygonal-volumetric-lighting-urp/wiki/Roadmap)
 * [Common Issues](https://github.com/westonwright/polygonal-volumetric-lighting-urp/wiki/Common-Issues)
-* [Advanced Setup](https://github.com/westonwright/polygonal-volumetric-lighting-urp/wiki/Advanced-Setup)
 
 ## Supported Versions
 Any version of Unity that supports Universal Render Pipeline version 12 and up (2021)
