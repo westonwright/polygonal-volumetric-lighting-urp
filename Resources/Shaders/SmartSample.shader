@@ -43,12 +43,21 @@ Shader "Hidden/DownsamplePoint"
 
             fixed4 frag (v2f i) : SV_Target
             {
+                /*
                 float4 d1 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(0, 0));
                 float4 d2 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(1, 0));
                 float4 d3 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(0, 1));
                 float4 d4 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(1, 1));
+                */
 
-                return float4(max(max(d1, d2), max(d3, d4)));
+                float4 d1 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(0, 0));
+                float4 d2 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(1, 0));
+                float4 d3 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(0, 1));
+                float4 d4 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(-1, 0));
+                float4 d5 = _MainTex.Sample(my_point_clamp_sampler, i.uv, int2(0, -1));
+
+                //return float4(max(max(d1, d2), max(d3, d4)));
+                return float4(max(max(max(d1, d2), max(d3, d4)), d5));
             }
             ENDCG
         }

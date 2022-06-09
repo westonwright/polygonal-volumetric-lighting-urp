@@ -218,7 +218,6 @@ public class MeshLightGlobalRenderFeature : ScriptableRendererFeature
         set { _fogDensity = value; }
     }
     [SerializeField]
-    [Range(0, 1)]
     float _fogDensity = .5f;
     
     public Color fogColor

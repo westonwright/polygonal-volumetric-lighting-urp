@@ -565,41 +565,8 @@ class MeshLightGlobalPass : ScriptableRenderPass
         uint yGroupSize;
         uint zGroupSize;
 
-        // shadow sampleing
-        cmd.SetGlobalMatrix("_worldToLight", shadowLight.localToWorldMatrix.inverse);
-        cmd.SetGlobalMatrix("_lightToWorld", shadowLight.localToWorldMatrix);
-        cmd.SetGlobalMatrix("_shadowToWorld0", _mainLightShadowMatricesInverse[0]);
-        cmd.SetGlobalMatrix("_shadowToWorld1", _mainLightShadowMatricesInverse[1]);
-        cmd.SetGlobalMatrix("_shadowToWorld2", _mainLightShadowMatricesInverse[2]);
-        cmd.SetGlobalMatrix("_shadowToWorld3", _mainLightShadowMatricesInverse[3]);
-        cmd.SetGlobalMatrix("_worldToShadow0", _mainLightShadowMatrices[0]);
-        cmd.SetGlobalMatrix("_worldToShadow1", _mainLightShadowMatrices[1]);
-        cmd.SetGlobalMatrix("_worldToShadow2", _mainLightShadowMatrices[2]);
-        cmd.SetGlobalMatrix("_worldToShadow3", _mainLightShadowMatrices[3]);
-        cmd.SetGlobalVector("_shadowSplitSphere0", _cascadeSplitDistances[0]);
-        cmd.SetGlobalVector("_shadowSplitSphere1", _cascadeSplitDistances[1]);
-        cmd.SetGlobalVector("_shadowSplitSphere2", _cascadeSplitDistances[2]);
-        cmd.SetGlobalVector("_shadowSplitSphere3", _cascadeSplitDistances[3]);
-
-        cmd.SetGlobalVector("_cascadeShadowSplitSphereRadii", new Vector4(
-            _cascadeSplitDistances[0].w,
-            _cascadeSplitDistances[1].w,
-            _cascadeSplitDistances[2].w,
-            _cascadeSplitDistances[3].w));
-        cmd.SetGlobalVector("_texelSizes", _texelSizes);
-
-        cmd.SetGlobalVector("_lightDirection", shadowLight.light.transform.forward);
-        //cmd.SetGlobalVector("_lightCameraChunk", _lightCameraChunk);
-
-        cmd.SetGlobalVector("_centerOffset", new Vector3(_lightCameraChunk.x + (_chunkSize / 2f), _lightCameraChunk.y + (_chunkSize / 2f), 0));
-        cmd.SetGlobalVector("_laplacianWorldSize", new Vector2(_baseTesselationMapWidth * _chunkSize, _baseTesselationMapWidth * _chunkSize));
-        //cmd.SetGlobalFloat("_chunkWorldSize", _chunkSize);
-        cmd.SetGlobalFloat("_depthBias", shadowData.bias[shadowLightIndex].x);
-        cmd.SetGlobalFloat("_maxCascadeDepth", _maxCascadeDepth);
-        cmd.SetGlobalFloat("_maxLightDepth", _maxCascadeDepth);
-        cmd.SetGlobalFloat("_minLightDepth", -Mathf.Infinity);
-
-        cmd.Blit(null, _localShadowTarget, _shadowSampleMaterial, 0);
+        // shadow sampling
+        ComputeShadowSample(cmd, shadowLight, shadowData, shadowLightIndex, _localShadowTarget);
 
         // laplacian edge map
         int kernelKernel = _laplacianCompute.FindKernel("LaplacianKernel");
@@ -678,6 +645,45 @@ class MeshLightGlobalPass : ScriptableRenderPass
         CommandBufferPool.Release(cmd);
         //context.Submit();
     }
+
+    private void ComputeShadowSample(CommandBuffer cmd, VisibleLight shadowLight, ShadowData shadowData, int shadowLightIndex, RenderTargetIdentifier endTexture)
+    {
+        cmd.SetGlobalMatrix("_worldToLight", shadowLight.localToWorldMatrix.inverse);
+        cmd.SetGlobalMatrix("_lightToWorld", shadowLight.localToWorldMatrix);
+        cmd.SetGlobalMatrix("_shadowToWorld0", _mainLightShadowMatricesInverse[0]);
+        cmd.SetGlobalMatrix("_shadowToWorld1", _mainLightShadowMatricesInverse[1]);
+        cmd.SetGlobalMatrix("_shadowToWorld2", _mainLightShadowMatricesInverse[2]);
+        cmd.SetGlobalMatrix("_shadowToWorld3", _mainLightShadowMatricesInverse[3]);
+        cmd.SetGlobalMatrix("_worldToShadow0", _mainLightShadowMatrices[0]);
+        cmd.SetGlobalMatrix("_worldToShadow1", _mainLightShadowMatrices[1]);
+        cmd.SetGlobalMatrix("_worldToShadow2", _mainLightShadowMatrices[2]);
+        cmd.SetGlobalMatrix("_worldToShadow3", _mainLightShadowMatrices[3]);
+        cmd.SetGlobalVector("_shadowSplitSphere0", _cascadeSplitDistances[0]);
+        cmd.SetGlobalVector("_shadowSplitSphere1", _cascadeSplitDistances[1]);
+        cmd.SetGlobalVector("_shadowSplitSphere2", _cascadeSplitDistances[2]);
+        cmd.SetGlobalVector("_shadowSplitSphere3", _cascadeSplitDistances[3]);
+
+        cmd.SetGlobalVector("_cascadeShadowSplitSphereRadii", new Vector4(
+            _cascadeSplitDistances[0].w,
+            _cascadeSplitDistances[1].w,
+            _cascadeSplitDistances[2].w,
+            _cascadeSplitDistances[3].w));
+        cmd.SetGlobalVector("_texelSizes", _texelSizes);
+
+        cmd.SetGlobalVector("_lightDirection", shadowLight.light.transform.forward);
+        //cmd.SetGlobalVector("_lightCameraChunk", _lightCameraChunk);
+
+        cmd.SetGlobalVector("_centerOffset", new Vector3(_lightCameraChunk.x + (_chunkSize / 2f), _lightCameraChunk.y + (_chunkSize / 2f), 0));
+        cmd.SetGlobalVector("_laplacianWorldSize", new Vector2(_baseTesselationMapWidth * _chunkSize, _baseTesselationMapWidth * _chunkSize));
+        //cmd.SetGlobalFloat("_chunkWorldSize", _chunkSize);
+        cmd.SetGlobalFloat("_depthBias", shadowData.bias[shadowLightIndex].x);
+        cmd.SetGlobalFloat("_maxCascadeDepth", _maxCascadeDepth);
+        cmd.SetGlobalFloat("_maxLightDepth", _maxCascadeDepth);
+        cmd.SetGlobalFloat("_minLightDepth", -Mathf.Infinity);
+
+        cmd.Blit(null, endTexture, _shadowSampleMaterial, 0);
+    }
+
     private void ComputeDepthDownsample(CommandBuffer cmd, RenderTargetIdentifier endTexture)
     {
         int downsamplePass = _smartSampleMaterial.FindPass("DownsamplePoint");
